@@ -47,6 +47,14 @@ function startSite(): Promise<Server> {
           'cache-control': PUBLIC,
           'set-cookie': ['PHPSESSID=abc; Path=/', 'form_key=xyz; Path=/'],
         });
+      case '/customer/account/': // production behind Varnish: Magento's own Cache-Control is not exposed
+      case '/prod-uncached.html':
+        return page({
+          'x-varnish': String(100 + n),
+          via: '1.1 varnish (Varnish/7.5)',
+          'cache-control': UNCACHEABLE,
+          'set-cookie': 'PHPSESSID=abc; Path=/',
+        });
       case '/plain.html':
         return page({});
       case '/leave':
@@ -133,6 +141,19 @@ describe('magento_cache_check', () => {
     expect(line(r.text, '/miss.html')).toMatch(/^MISS/);
     expect(r.text).toContain('response sets cookies (PHPSESSID, form_key)');
     expect(r.text).toContain('bin/magento cache:status full_page');
+  });
+
+  it('production mode: infers that cart/checkout/customer pages are uncacheable by design', async () => {
+    const r = await call('magento_cache_check', { urls: [`${origin}/customer/account/`] });
+    expect(line(r.text, '/customer/account/')).toMatch(/^NOT_CACHEABLE/);
+    expect(r.text).toContain('inferred from the URL: production mode hides X-Magento-Cache-Control');
+  });
+
+  it('production mode: a normal page that stays MISS says the reason is hidden', async () => {
+    const r = await call('magento_cache_check', { urls: [`${origin}/prod-uncached.html`] });
+    expect(line(r.text, '/prod-uncached.html')).toMatch(/^MISS/);
+    expect(r.text).toContain('X-Magento-Cache-Control is sent in developer mode only');
+    expect(r.text).toContain('response sets cookies (PHPSESSID)');
   });
 
   it('says UNKNOWN when there are no cache headers at all', async () => {

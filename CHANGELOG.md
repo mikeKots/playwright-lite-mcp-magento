@@ -18,6 +18,11 @@ First public version.
 - Origin allowlist (`PW_ALLOWED_ORIGINS`, required), enforced on tool input and on every top-level navigation, including each hop of a server redirect chain.
 - Tool arguments are never logged; typed values are not echoed back.
 
+### Tested
+- Mage-OS 4.0.0 + Hyvä in developer and production mode, and with the Luma theme (`sample-store/check.sh`).
+- In production mode Magento hides `X-Magento-Cache-Control`: `magento_cache_check` then infers that cart/checkout/customer pages are uncacheable by design, explains that the reason for other MISS pages is hidden, and no longer shows the proxy-rewritten `Cache-Control`.
+- On Luma, option inputs of configurable products are rendered after page load: `magento_guest_checkout` still fails fast with the "product has options" explanation.
+
 ### Distribution
 - Docker image with Node and Chromium's headless shell only (~1.2 GB); `PW_IGNORE_HTTPS_ERRORS` for local dev stores.
 - GitHub Actions: CI (typecheck, tests, build, Docker build) and Release (GHCR image for amd64/arm64, GitHub release, optional npm publish).

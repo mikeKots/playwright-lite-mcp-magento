@@ -37,6 +37,15 @@ Admin: https://app.hyva-demo.test/backend — `admin` / `Admin123!demo`.
 ```bash
 npm run build                                  # mcp-smoke.mjs needs dist/
 sample-store/check.sh                          # or: check.sh https://another-store.test
+EXPECT_THEME=Magento/luma sample-store/check.sh   # store running Luma; EXPECT_THEME=any skips the theme check
+```
+
+To try the tools on Luma, switch the demo store's theme (ids: `SELECT theme_id, theme_path FROM theme`):
+
+```bash
+cd ~/Documents/hyva-demo
+warden env exec php-fpm bin/magento config:set design/theme/theme_id 4    # Magento/luma (5 = Hyva/default)
+warden env exec php-fpm bin/magento cache:flush
 ```
 
 `check.sh` checks the store with curl (home page 200, Hyvä active, search finds products,
