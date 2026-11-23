@@ -1,0 +1,12 @@
+node_modules
+dist
+sample-store
+.git
+.github
+.idea
+.vscode
+.claude
+*.log
+auth-state*.json
+*.storage.json
+src/**/*.test.ts

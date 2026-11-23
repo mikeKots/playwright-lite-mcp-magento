@@ -1,44 +1,27 @@
-#--------------------------#
-# Magento Default Files    #
-#--------------------------#
+# dependencies and build output
+node_modules/
+dist/
 
-/PATCH_*.sh
+# Playwright session state: contains live session cookies, never commit
+auth-state*.json
+*.storage.json
 
-/app/etc/local.xml
+# test / tooling artifacts
+coverage/
+test-results/
+playwright-report/
+*.log
 
-/media/*
-!/media/.htaccess
+# local env and editor files
+.env
+.env.*
+.idea/
+.vscode/
+.DS_Store
+.claude/settings.local.json
 
-!/media/customer
-/media/customer/*
-!/media/customer/.htaccess
+# snapshots written by @playwright/mcp (benchmark)
+.playwright-mcp/
 
-!/media/dhl
-/media/dhl/*
-!/media/dhl/logo.jpg
-
-!/media/downloadable
-/media/downloadable/*
-!/media/downloadable/.htaccess
-
-!/media/xmlconnect
-/media/xmlconnect/*
-
-!/media/xmlconnect/custom
-/media/xmlconnect/custom/*
-!/media/xmlconnect/custom/ok.gif
-
-!/media/xmlconnect/original
-/media/xmlconnect/original/*
-!/media/xmlconnect/original/ok.gif
-
-!/media/xmlconnect/system
-/media/xmlconnect/system/*
-!/media/xmlconnect/system/ok.gif
-
-/var/*
-!/var/.htaccess
-
-!/var/package
-/var/package/*
-!/var/package/*.xml
+# local notes for Claude Code sessions (personal, not part of the project)
+CLAUDE.md

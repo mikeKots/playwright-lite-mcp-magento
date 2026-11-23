@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  docker:
+    # Catches a broken Dockerfile or a Playwright image tag that no longer matches package.json.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t playwright-lite-mcp:ci .
+      - name: Server starts in the image
+        run: |
+          echo '' | docker run -i --rm -e PW_ALLOWED_ORIGINS=https://example.com playwright-lite-mcp:ci 2>&1 | tee out.log
+          grep -q '"server ready"' out.log
