@@ -34,7 +34,7 @@ Without Docker, see [Step 1](#step-1-install) and [Step 6](#step-6-connect-to-cl
 
 | Tool | One call does |
 |---|---|
-| `magento_guest_checkout` | product → cart → checkout → shipping → payment (→ Place Order); totals, offered methods, console errors per step, failed requests |
+| `magento_guest_checkout` | product (simple or configurable with options) → cart → checkout → shipping → payment (→ Place Order); totals, offered methods, console errors per step, failed requests |
 | `magento_cache_check` | full page cache verdict per URL (Varnish, Fastly, Cloudflare, built-in), with the reason when a page is not cached |
 | `magento_graphql_check` | GraphQL presets (store, catalog, products incl. zero prices, guest cart, GET caching) or your own query |
 | `page_health_check` | HTTP status, load time and JS errors for a list of pages |
@@ -253,8 +253,9 @@ Input (only `productUrl` is required):
 
 | Field | Default | |
 |---|---|---|
-| `productUrl` | — | Product page of a **simple** product (no required options) |
+| `productUrl` | — | Product page of a simple or configurable product |
 | `qty` | page default | |
+| `options` | — | Configurable products: `"first"` (first in-stock variant) or attribute → value labels, e.g. `{ "Size": "M", "Color": "Blue" }`; attributes you leave out are taken from the first in-stock match |
 | `email` | `guest@example.com` | |
 | `address` | US test address (Austin, Texas) | Any of `firstname`, `lastname`, `street`, `city`, `postcode`, `countryId`, `region`, `telephone` |
 | `shippingMethod` | first offered | `carrier_method` code, e.g. `flatrate_flatrate` |
@@ -266,7 +267,8 @@ Behavior worth knowing:
 - Console errors are tagged with the step they happened in (`[payment] console: ...`), and the store's own 4xx/5xx responses are listed: these are usually the actual checkout bug.
 - The 404 on `guest-carts/.../totals` right after Place Order is normal Magento behavior (the quote is closed once the order exists) and is not reported.
 - On failure the result is `isError: true` with the failed step and the reason, and the page is left at that step, so the agent can call `browser_snapshot` to look.
-- Products with options (configurable, bundle) fail immediately with an explanation: use `browser_run` to pick the options.
+- Configurable products: the option values and which combinations are in stock come from GraphQL; the options are then chosen on the page the way a customer does it (Luma swatches clicked, Hyvä radios checked, dropdowns selected). The cart is then checked to hold exactly the chosen variant's SKU, so a theme bug that adds the wrong variant is caught. Unknown values and out-of-stock combinations are explained before anything is clicked.
+- Without `options`, a product with options fails immediately with an explanation. Bundle products are not supported: use `browser_run`.
 - Supported: the standard `Magento_Checkout` (Luma, and Hyvä with `hyva-themes/magento2-luma-checkout`). Hyvä Checkout (Magewire) and other one-step checkouts are detected and reported as unsupported.
 
 ## Step 10. Full page cache check (`magento_cache_check`)

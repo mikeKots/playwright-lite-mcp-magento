@@ -85,7 +85,7 @@ Restart Claude Code → `/mcp` → `playwright-lite: connected`. Example prompts
 - "Run `magento_graphql_check` on https://app.hyva-demo.test and tell me what fails"
 - "Using `browser_run`, add the first product from https://app.hyva-demo.test/gear/bags.html to the cart and return the subtotal"
 
-Simple products in the sample data for checkout: `joust-duffle-bag.html`, `strive-shoulder-pack.html`, `crown-summit-backpack.html`.
+Simple products in the sample data for checkout: `joust-duffle-bag.html`, `strive-shoulder-pack.html`, `crown-summit-backpack.html`. Configurable (pass `options`): `breathe-easy-tank.html` (Color: Purple/White/Yellow, Size: XS–XL).
 
 ## Manage
 

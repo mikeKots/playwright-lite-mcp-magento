@@ -133,8 +133,15 @@ const GraphqlCheckInput = z.object({
   maxChars: z.number().int().positive().max(50_000).optional().describe('Limit for custom query data (default 2000)'),
 });
 const GuestCheckoutInput = z.object({
-  productUrl: z.string().describe('Product page URL of a SIMPLE product (no required options); origin must be allowlisted'),
+  productUrl: z.string().describe('Product page URL (simple or configurable product); origin must be allowlisted'),
   qty: z.number().int().positive().max(1000).optional().describe('Quantity to add (default: the page default, usually 1)'),
+  options: z
+    .union([z.literal('first'), z.record(z.string(), z.string())])
+    .optional()
+    .describe(
+      'Configurable product options: "first" = first in-stock variant, or attribute label → value label, ' +
+        'e.g. { "Size": "M", "Color": "Blue" } (unlisted attributes: first in-stock match)',
+    ),
   email: z.string().optional().describe('Guest email (default guest@example.com)'),
   address: z
     .object({
@@ -433,7 +440,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     {
       title: 'Magento guest checkout',
       description:
-        'Magento 2 / Adobe Commerce / Mage-OS: add a simple product to the cart and go through the standard checkout ' +
+        'Magento 2 / Adobe Commerce / Mage-OS: add a product (simple, or configurable with options) to the cart and go through the standard checkout ' +
         'as a guest (address, shipping method, payment method) in ONE call. Returns offered shipping/payment methods, ' +
         'order totals, step timings, JS console errors and failed HTTP requests. Stops before Place Order unless ' +
         'placeOrder is true. Works with Luma and Hyvä (luma-checkout fallback) storefronts, not with Hyvä Checkout.',
