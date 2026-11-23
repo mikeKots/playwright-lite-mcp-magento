@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // End-to-end smoke test: starts dist/index.js over stdio (like Claude Code does), speaks raw
 // MCP JSON-RPC, runs page_health_check, browser_run (code mode), magento_cache_check,
-// magento_graphql_check and magento_guest_checkout against the sample store.
+// magento_graphql_check, magento_product_check and magento_guest_checkout against the sample store.
 import { fileURLToPath } from 'node:url';
 import { startMcpServer } from './mcp-client.mjs';
 
@@ -71,6 +71,12 @@ try {
 
   const graphql = await call('magento_graphql_check', { storeUrl: base });
   report('magento_graphql_check', { ok: graphql.ok && /Summary: 5\/5 OK/.test(graphql.text), text: graphql.text });
+
+  // Price and stock on the page must match GraphQL: simple, configurable, bundle and grouped products.
+  const product = await call('magento_product_check', {
+    urls: ['joust-duffle-bag', 'breathe-easy-tank', 'sprite-yoga-companion-kit', 'set-of-sprite-yoga-straps'].map((p) => `${base}/${p}.html`),
+  });
+  report('magento_product_check', { ok: product.ok && /^4\/4 OK/.test(product.text), text: product.text });
 
   // Code mode with the magento helpers: GraphQL → cache check of every Gear category → two guest
   // checkouts, all in one call; only the small summary comes back.

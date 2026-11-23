@@ -5,6 +5,7 @@ All notable changes to this project. Versions follow [semantic versioning](https
 ## [Unreleased]
 
 ### Added
+- `magento_product_check` and `magento.product()`: price and stock of each product page compared with Magento GraphQL, as a guest. Verdict per product (OK / MISMATCH / UNKNOWN / ERROR) with likely causes (stale full page cache, tax display, indexer, special price); flags zero prices, configurables without in-stock variants, a missing Add to Cart button, and JSON-LD / `product:price` meta that disagree with GraphQL. Works with Luma and Hyvä.
 - `magento_guest_checkout` and `magento.checkout()` take `options` for configurable products: `"first"` (first in-stock variant) or attribute → value labels such as `{ "Size": "M", "Color": "Blue" }`. Values and stock come from GraphQL; the options are chosen on the page (Luma swatches, Hyvä radios, dropdowns), and the cart is checked to hold the chosen variant's SKU.
 
 ### Fixed
