@@ -11,6 +11,7 @@ import { HELPERS_DOC, createMagentoHelpers } from './helpers.js';
 import type { Logger } from './logger.js';
 import type { Mutex } from './mutex.js';
 import { formatCheckoutReport, magentoGuestCheckout } from './magento.js';
+import { checkProducts, formatProductReport } from './product.js';
 import { assertUrlAllowed } from './security.js';
 import { ScriptTimeoutError, formatResult, runScript } from './script.js';
 
@@ -131,6 +132,10 @@ const GraphqlCheckInput = z.object({
   sku: z.string().optional().describe('SKU for the cart check (default: first in-stock simple product)'),
   storeCode: z.string().optional().describe('Store view code, sent as the Store header'),
   maxChars: z.number().int().positive().max(50_000).optional().describe('Limit for custom query data (default 2000)'),
+});
+const ProductCheckInput = z.object({
+  urls: z.array(z.string()).min(1).max(20).describe('Product page URLs (simple, configurable, bundle, grouped...)'),
+  storeCode: z.string().optional().describe('Store view code for GraphQL, sent as the Store header (default: the URL\'s store)'),
 });
 const GuestCheckoutInput = z.object({
   productUrl: z.string().describe('Product page URL (simple or configurable product); origin must be allowlisted'),
@@ -429,6 +434,36 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             maxChars: args.maxChars ?? 2000,
           }),
         );
+      } finally {
+        await client.dispose();
+      }
+    }),
+  );
+
+  server.registerTool(
+    'magento_product_check',
+    {
+      title: 'Magento price and stock check',
+      description:
+        'Compare price and stock of each product page with what Magento GraphQL reports, as a guest, in ONE call. ' +
+        'Verdict per product: OK / MISMATCH / UNKNOWN (price not found on the page) / ERROR, with the page and GraphQL ' +
+        'values side by side and likely causes (stale full page cache, price indexer, special price, tax display). ' +
+        'Also flags zero prices, configurables without in-stock variants, a missing Add to Cart button, and JSON-LD / ' +
+        'product:price meta that disagree (warnings).',
+      inputSchema: ProductCheckInput,
+      annotations: { readOnlyHint: true },
+    },
+    run<z.infer<typeof ProductCheckInput>>('magento_product_check', async ({ urls, storeCode }) => {
+      const allowed = urls.map((u) => assertUrlAllowed(u, cfg.PW_ALLOWED_ORIGINS).toString());
+      const client = await browser.newGuestRequest();
+      try {
+        const reports = await checkProducts(allowed, {
+          request: client,
+          withGuestPage: (fn) => browser.withIsolatedPage((p) => fn(p)),
+          storeCode,
+          timeoutMs: cfg.PW_NAV_TIMEOUT_MS,
+        });
+        return text(formatProductReport(reports));
       } finally {
         await client.dispose();
       }

@@ -7,6 +7,7 @@ import { acceptCookieBanner } from './consent.js';
 import { checkPages, type PageHealth } from './health.js';
 import { magentoGuestCheckout, type Address, type CheckoutReport } from './magento.js';
 import type { OptionChoice } from './options.js';
+import { checkProducts, type ProductReport } from './product.js';
 import { assertUrlAllowed } from './security.js';
 
 /**
@@ -32,6 +33,8 @@ export interface MagentoHelpers {
   ): Promise<{ status: number; ms: number; data?: unknown; errors: Array<{ message: string; category?: string; path?: string }> }>;
   /** GraphQL preset checks: { ok, name, ms, detail }[]. */
   graphqlChecks(opts?: { checks?: GraphqlCheck[]; sku?: string; storeUrl?: string; storeCode?: string }): Promise<GraphqlLine[]>;
+  /** Price and stock per product page vs. GraphQL, as a guest: { url, verdict, api, page, problems, notes }[]. */
+  product(urls: string[], opts?: { storeCode?: string }): Promise<ProductReport[]>;
   /** Guest checkout in a separate fresh guest browser context (the script's page is untouched). */
   checkout(opts: {
     productUrl: string;
@@ -54,6 +57,7 @@ export const HELPERS_DOC =
   'magento.cache(urls, {requests?, withSession?}) → [{url, verdict: CACHED|NOT_CACHEABLE|MISS|UNKNOWN|ERROR, hops, notes}]; ' +
   'magento.graphql(query, variables?, {method?, storeUrl?, storeCode?}) → {status, ms, data, errors}; ' +
   'magento.graphqlChecks({checks?, sku?}) → [{ok, name, ms, detail}]; ' +
+  'magento.product(urls, {storeCode?}) → [{url, verdict: OK|MISMATCH|UNKNOWN|ERROR, problems, notes, api: {sku, minFinal, stockStatus}, page: {finalPrice, stock}}]; ' +
   'magento.checkout({productUrl, qty?, options?: "first"|{Size:"M"}, shippingMethod?, paymentMethod?, placeOrder?}) → ' +
   '{ok, failedStep, error, chosenOptions, cart, shippingMethods, totals, orderNumber, consoleErrors, failedRequests, steps} ' +
   '(fresh guest context, ~5-10s each: raise timeoutMs for loops); magento.cart() → {items, subtotal} | null. ' +
@@ -123,6 +127,18 @@ export function createMagentoHelpers(page: Page, cfg: Config, browser: BrowserSe
       const checks = opts.checks?.filter((c) => (GRAPHQL_CHECKS as readonly string[]).includes(c));
       return withGuestRequest((req) =>
         runGraphqlPresets(req, { endpoint, checks, sku: opts.sku, storeCode: opts.storeCode }),
+      );
+    },
+
+    async product(urls, opts = {}) {
+      const resolved = urls.map((u) => resolve(u).toString());
+      return withGuestRequest((req) =>
+        checkProducts(resolved, {
+          request: req,
+          withGuestPage: (fn) => browser.withIsolatedPage((p) => fn(p)),
+          storeCode: opts.storeCode,
+          timeoutMs: cfg.PW_NAV_TIMEOUT_MS,
+        }),
       );
     },
 

@@ -36,6 +36,7 @@ Without Docker, see [Step 1](#step-1-install) and [Step 6](#step-6-connect-to-cl
 |---|---|
 | `magento_guest_checkout` | product (simple or configurable with options) → cart → checkout → shipping → payment (→ Place Order); totals, offered methods, console errors per step, failed requests |
 | `magento_cache_check` | full page cache verdict per URL (Varnish, Fastly, Cloudflare, built-in), with the reason when a page is not cached |
+| `magento_product_check` | price and stock on each product page vs. GraphQL, as a guest; catches a stale full page cache, indexer and special price bugs, zero prices, wrong JSON-LD |
 | `magento_graphql_check` | GraphQL presets (store, catalog, products incl. zero prices, guest cart, GET caching) or your own query |
 | `page_health_check` | HTTP status, load time and JS errors for a list of pages |
 | `browser_run` | code mode: one Playwright script with `page` and the `magento` helpers, only its return value comes back |
@@ -58,7 +59,7 @@ Tokens are estimated as characters / 4. The official server gets its cheapest re
 | Store | Mode | Result |
 |---|---|---|
 | Mage-OS 4.0.0 (Magento 2.4.x) + Hyvä 1.5, Varnish | developer | all tools pass |
-| same store, Hyvä | production | all tools pass |
+| same store, Hyvä | production | all tools pass (`magento_product_check` not run in production yet) |
 | same store, Luma | developer | all tools pass |
 | Adobe Commerce Cloud (Fastly), Hyvä Checkout | — | not tested yet: reports and PRs welcome |
 
@@ -95,6 +96,8 @@ src/
   browser.ts        browser lifecycle: lazy start, auto-restart, redirect blocking
   tools.ts          MCP tools
   magento.ts        Magento guest checkout flow (magento_guest_checkout)
+  options.ts        configurable product options for the checkout
+  product.ts        price and stock check (magento_product_check)
   cache.ts          full page cache check (magento_cache_check)
   graphql.ts        GraphQL API check (magento_graphql_check)
   health.ts         page health check (page_health_check, magento.health)
@@ -102,7 +105,7 @@ src/
   mutex.ts          serialized tool execution
   logger.ts         JSON logs to stderr
   errors.ts         turns Playwright errors into short, agent-readable messages
-  *.test.ts         tests: allowlist, cookies, code mode, tool integration, checkout, cache, GraphQL
+  *.test.ts         tests: allowlist, cookies, code mode, tool integration, checkout, cache, GraphQL, product
 sample-store/       demo store (Mage-OS + Hyvä on Warden): setup.sh, check.sh, mcp-smoke.mjs, benchmark.mjs
 .github/workflows/  CI (tests + Docker build) and Release (GHCR image, GitHub release, npm)
 ```
@@ -213,6 +216,7 @@ Inside a script, `magento` is in scope next to `page`. The helpers are the domai
 | `magento.cache(urls, { requests?, withSession? })` | `[{ url, verdict, hops, notes, ... }]` |
 | `magento.graphql(query, variables?, { method?, storeUrl?, storeCode? })` | `{ status, ms, data, errors }` |
 | `magento.graphqlChecks({ checks?, sku? })` | `[{ ok, name, ms, detail }]` |
+| `magento.product(urls, { storeCode? })` | `[{ url, verdict, problems, notes, api, page }]`: price and stock check in a fresh guest context |
 | `magento.checkout({ productUrl, qty?, shippingMethod?, paymentMethod?, placeOrder? })` | `{ ok, failedStep, error, cart, shippingMethods, totals, orderNumber, consoleErrors, failedRequests, steps }`; runs in a separate fresh guest context, so the script's page is untouched |
 | `magento.cart()` | `{ items, subtotal }` of the script's own session, or `null` |
 
@@ -317,7 +321,29 @@ Summary: 5/5 OK
 
 With `query` (and optional `variables`, `method: "GET"` to see the cache status) it runs your query instead and returns HTTP status, GraphQL errors with category and path, timing and the data truncated to `maxChars` (default 2000). Other input: `storeUrl` (any store URL, or the full endpoint), `checks` (a subset of presets), `storeCode` (sent as the `Store` header). Requests are sent as a cookie-less guest; non-JSON answers (an HTML error page, a redirect) are described instead of failing the call.
 
-## Step 12. Adding your own tool
+## Step 12. Price and stock check (`magento_product_check`)
+
+Compares what a guest sees on each product page with what Magento GraphQL reports for the same product (found by URL through `route`, falling back to the `url_key`). The page is opened in a fresh guest context, so both sides use the NOT LOGGED IN customer group. Here the price was changed in the database without a cache flush, so Varnish still serves the old page:
+
+```
+0/1 OK, 1 MISMATCH
+MISMATCH 24-MB01 "Joust Duffle Bag" (simple) https://app.hyva-demo.test/joust-duffle-bag.html
+         price page 34.00 / GraphQL 39.00 USD | stock page "IN STOCK" / GraphQL IN_STOCK | page cache HIT via X-Cache
+         - price: page 34.00 ≠ GraphQL final 39.00 USD (page served from cache, HIT via X-Cache: stale full page cache?)
+         · WARNING JSON-LD Product price 34.00 ≠ GraphQL 39.00 USD
+         · WARNING meta product:price:amount price 34.00 ≠ GraphQL 39.00 USD
+```
+
+| Check | Problem (`-`, makes the verdict MISMATCH) when |
+|---|---|
+| price | the main price on the page ≠ GraphQL `price_range.minimum_price.final_price` (configurable, bundle, grouped: the minimum). Hints: page served from cache (stale FPC), a tax-like ratio (catalog price display incl./excl. tax), otherwise indexer / catalog price rule / special price dates |
+| old price | GraphQL has a discount and the struck-through price ≠ the regular price, or the page shows an old price GraphQL does not have |
+| stock | the page label (In stock / Out of stock) ≠ GraphQL `stock_status`; in stock without an Add to Cart button; a configurable whose parent is in stock but no variant is |
+| zero price | GraphQL final price is 0 |
+
+Verdicts: `OK`, `MISMATCH`, `UNKNOWN` (the page price was not found: theme markup not recognized), `ERROR` (page or GraphQL failed, the URL is not a product). JSON-LD offers (`Product`, `ProductGroup` variants, `AggregateOffer`) and the `product:price:amount` meta tag are compared too, as warnings (`·`) that do not change the verdict. Prices are read from the first `.price-box` in `.product-info-main` outside related/upsell lists: `data-price-amount` on Luma, the formatted text on Hyvä (any locale format, e.g. `1.234,50 €`). Input: `urls` (up to 20), `storeCode` (sent to GraphQL as the `Store` header).
+
+## Step 13. Adding your own tool
 
 ```ts
 const CartTotalInput = z.object({ productUrl: z.string() });
