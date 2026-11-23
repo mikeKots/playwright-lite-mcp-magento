@@ -1,5 +1,6 @@
 import type { Locator, Page, Request, Response } from 'playwright';
 import { ToolError, describeError } from './errors.js';
+import { chooseVariant, loadProductOptions, selectOptionsOnPage, type OptionChoice } from './options.js';
 
 /**
  * Magento 2 / Adobe Commerce / Mage-OS guest checkout, driven through the real storefront UI.
@@ -27,6 +28,8 @@ export interface Address {
 export interface GuestCheckoutOptions {
   productUrl: string;
   qty?: number;
+  /** Options of a configurable product: "first" (first in-stock variant) or { Size: "M", Color: "Blue" }. */
+  options?: OptionChoice;
   email?: string;
   address?: Partial<Address>;
   /** carrier_method code, e.g. "flatrate_flatrate". Default: first available method. */
@@ -47,7 +50,9 @@ export interface CheckoutReport {
   failedStep?: string;
   error?: string;
   product?: string;
-  cart?: { items: number; subtotal: string };
+  /** Chosen configurable options, e.g. "Color: Purple, Size: XS (WT09-XS-Purple)". */
+  chosenOptions?: string;
+  cart?: { items: number; subtotal: string; skus?: string[] };
   shippingMethods: Array<{ code: string; label: string; price: string }>;
   shippingMethod?: string;
   paymentMethods: string[];
@@ -74,6 +79,9 @@ export const DEFAULT_ADDRESS: Address = {
 const CART_SECTION = '/customer/section/load/?sections=cart&force_new_section_timestamp=true';
 const LOADER = '.loading-mask, .loader, [data-role="loader"]';
 const MAX_FAILED_REQUESTS = 20;
+const OPTIONS_HINT =
+  'Product has options to choose: pass options: "first" (first in-stock variant) or e.g. { "Size": "M", "Color": "Blue" }. ' +
+  'Bundle products: use browser_run.';
 // Once an order exists Magento deactivates the quote, and the checkout page's last totals /
 // payment-information refresh answers 404. That is normal, not a store bug.
 const CLOSED_QUOTE_REQUEST = /\/V1\/guest-carts\/[^/]+\//;
@@ -154,15 +162,32 @@ export async function magentoGuestCheckout(page: Page, opts: GuestCheckoutOption
       if ((await button.count()) === 0) {
         throw new StepError('add_to_cart', 'No #product-addtocart-button on the page: is this a product page?');
       }
-      const optionFields = await page
-        .locator('#product_addtocart_form [name^="super_attribute"], #product_addtocart_form [name^="bundle_option"]')
-        .count();
-      if (optionFields > 0) {
-        throw new StepError(
-          'add_to_cart',
-          'Product has options to choose (configurable/bundle): pass a simple product URL, ' +
-            'or use browser_run to pick the options first.',
-        );
+      let chosenSku: string | undefined;
+      if (opts.options) {
+        let product: Awaited<ReturnType<typeof loadProductOptions>>;
+        try {
+          product = await loadProductOptions(page, opts.productUrl);
+        } catch (err) {
+          throw new StepError('add_to_cart', `Could not read the product options: ${describeError(err)}`);
+        }
+        if (product.configurable) {
+          let chosen: ReturnType<typeof chooseVariant>;
+          try {
+            chosen = chooseVariant(product.configurable, opts.options);
+          } catch (err) {
+            throw new StepError('add_to_cart', describeError(err));
+          }
+          await selectOptionsOnPage(page, chosen, opts.stepTimeoutMs);
+          report.chosenOptions = `${chosen.summary} (${chosen.sku})`;
+          chosenSku = chosen.sku;
+        } else if (product.type === 'BundleProduct') {
+          throw new StepError('add_to_cart', `Bundle products are not supported: use browser_run to pick the bundle items.`);
+        }
+      } else {
+        const optionFields = await page
+          .locator('#product_addtocart_form [name^="super_attribute"], #product_addtocart_form [name^="bundle_option"]')
+          .count();
+        if (optionFields > 0) throw new StepError('add_to_cart', OPTIONS_HINT);
       }
       if (opts.qty !== undefined) {
         const qty = page.locator('#product_addtocart_form input[name="qty"], input[name="qty"]').first();
@@ -179,13 +204,14 @@ export async function magentoGuestCheckout(page: Page, opts: GuestCheckoutOption
             (invalid ? ` Required fields not filled: ${invalid}.` : '') +
             (messages ? ` Store says: ${messages}` : '') +
             // Luma renders swatch inputs with JS after load, so the pre-check above can miss them.
-            (/super_attribute|bundle_option/.test(invalid ?? '')
-              ? ' Product has options to choose (configurable/bundle): pass a simple product URL, ' +
-                'or use browser_run to pick the options first.'
-              : ''),
+            (/super_attribute|bundle_option/.test(invalid ?? '') ? ` ${OPTIONS_HINT}` : ''),
         );
       }
       report.cart = cart;
+      // The cart must hold the variant that was chosen, not just "an item" (a theme bug can add the wrong one).
+      if (chosenSku && cart.skus && cart.skus.length > 0 && !cart.skus.includes(chosenSku)) {
+        throw new StepError('add_to_cart', `Cart holds ${cart.skus.join(', ')} instead of the chosen variant ${chosenSku}.`);
+      }
     });
 
     await step('checkout_load', async () => {
@@ -333,7 +359,10 @@ export function formatCheckoutReport(r: CheckoutReport, placeOrder: boolean): st
       : `Guest checkout: FAILED at ${r.failedStep}: ${r.error}`,
   );
   if (r.product || r.cart) {
-    lines.push(`Product: ${r.product ?? '?'}${r.cart ? ` | cart: ${r.cart.items} item(s), subtotal ${r.cart.subtotal}` : ''}`);
+    lines.push(
+      `Product: ${r.product ?? '?'}${r.chosenOptions ? ` [${r.chosenOptions}]` : ''}` +
+        `${r.cart ? ` | cart: ${r.cart.items} item(s), subtotal ${r.cart.subtotal}` : ''}`,
+    );
   }
   if (r.shippingMethods.length > 0) {
     const offered = r.shippingMethods.map((m) => `${m.code} (${m.label || '?'}, ${m.price || '?'})`).join('; ');
@@ -362,25 +391,35 @@ export function formatCheckoutReport(r: CheckoutReport, placeOrder: boolean): st
 // ---------- helpers ----------
 
 async function waitForCart(page: Page, origin: string, timeoutMs: number, abort: () => Promise<string | undefined>) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    // A form that failed validation will never submit: stop instead of waiting for the timeout.
-    if (await abort().catch(() => undefined)) return undefined;
+  const readCart = async () => {
     try {
       // page.request shares the context cookies, so this is the same session the browser has.
       const res = await page.request.get(new URL(CART_SECTION, origin).toString(), {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
         maxRedirects: 0,
       });
-      if (res.ok()) {
-        const cart = ((await res.json()) as { cart?: { summary_count?: number; subtotal?: string } }).cart;
-        if (cart?.summary_count && cart.summary_count > 0) {
-          return { items: cart.summary_count, subtotal: stripTags(cart.subtotal ?? '') };
-        }
-      }
+      if (!res.ok()) return undefined;
+      const cart = (
+        (await res.json()) as { cart?: { summary_count?: number; subtotal?: string; items?: Array<{ product_sku?: string }> } }
+      ).cart;
+      return cart?.summary_count && cart.summary_count > 0
+        ? {
+            items: cart.summary_count,
+            subtotal: stripTags(cart.subtotal ?? ''),
+            skus: (cart.items ?? []).map((i) => i.product_sku).filter((x): x is string => Boolean(x)),
+          }
+        : undefined;
     } catch {
-      // Not JSON yet (page still navigating after a form POST): retry.
+      return undefined; // Not JSON yet (page still navigating after a form POST): retry.
     }
+  };
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const cart = await readCart();
+    if (cart) return cart;
+    // Only with an empty cart: a form that failed validation will never submit, so stop early.
+    // (Checked after the cart, because Hyvä resets the form, leaving "invalid" fields, after a successful add.)
+    if (await abort().catch(() => undefined)) return readCart();
     await page.waitForTimeout(500);
   }
   return undefined;

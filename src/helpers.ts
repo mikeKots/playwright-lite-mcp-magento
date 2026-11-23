@@ -6,6 +6,7 @@ import { GRAPHQL_CHECKS, graphqlRequest, runGraphqlPresets, type GraphqlCheck, t
 import { acceptCookieBanner } from './consent.js';
 import { checkPages, type PageHealth } from './health.js';
 import { magentoGuestCheckout, type Address, type CheckoutReport } from './magento.js';
+import type { OptionChoice } from './options.js';
 import { assertUrlAllowed } from './security.js';
 
 /**
@@ -35,6 +36,7 @@ export interface MagentoHelpers {
   checkout(opts: {
     productUrl: string;
     qty?: number;
+    options?: OptionChoice;
     email?: string;
     address?: Partial<Address>;
     shippingMethod?: string;
@@ -52,8 +54,8 @@ export const HELPERS_DOC =
   'magento.cache(urls, {requests?, withSession?}) → [{url, verdict: CACHED|NOT_CACHEABLE|MISS|UNKNOWN|ERROR, hops, notes}]; ' +
   'magento.graphql(query, variables?, {method?, storeUrl?, storeCode?}) → {status, ms, data, errors}; ' +
   'magento.graphqlChecks({checks?, sku?}) → [{ok, name, ms, detail}]; ' +
-  'magento.checkout({productUrl, qty?, shippingMethod?, paymentMethod?, placeOrder?}) → ' +
-  '{ok, failedStep, error, cart, shippingMethods, totals, orderNumber, consoleErrors, failedRequests, steps} ' +
+  'magento.checkout({productUrl, qty?, options?: "first"|{Size:"M"}, shippingMethod?, paymentMethod?, placeOrder?}) → ' +
+  '{ok, failedStep, error, chosenOptions, cart, shippingMethods, totals, orderNumber, consoleErrors, failedRequests, steps} ' +
   '(fresh guest context, ~5-10s each: raise timeoutMs for loops); magento.cart() → {items, subtotal} | null. ' +
   'Return a small summary, not whole reports.';
 

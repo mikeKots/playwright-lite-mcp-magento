@@ -101,6 +101,16 @@ try {
   // Stops on the payment step (no placeOrder), so running the check does not create orders.
   const checkout = await call('magento_guest_checkout', { productUrl: `${base}/joust-duffle-bag.html` });
   report('magento_guest_checkout', { ok: checkout.ok && /Order Total/.test(checkout.text), text: checkout.text });
+
+  // Configurable product: options picked on the page, the variant in the cart is verified by SKU.
+  const configurable = await call('magento_guest_checkout', {
+    productUrl: `${base}/breathe-easy-tank.html`,
+    options: { Size: 'M', Color: 'Yellow' },
+  });
+  report('magento_guest_checkout (configurable)', {
+    ok: configurable.ok && /WT09-M-Yellow/.test(configurable.text) && /Order Total/.test(configurable.text),
+    text: configurable.text,
+  });
 } catch (err) {
   failed++;
   console.log(`FAIL ${err.message}`);

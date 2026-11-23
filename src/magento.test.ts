@@ -16,7 +16,13 @@ type Result = { content: Array<{ type: string; text?: string }>; isError?: boole
 type Handler = (args: unknown) => Promise<Result>;
 
 // Carts are per session cookie, like Magento's quote, so "fresh guest" behaviour is observable.
-const store = { carts: new Map<string, number>(), ordered: false, orderRequests: 0, nextSession: 1 };
+const store = {
+  carts: new Map<string, number>(),
+  skus: new Map<string, string[]>(),
+  ordered: false,
+  orderRequests: 0,
+  nextSession: 1,
+};
 const sessionOf = (cookie = '') => /sid=(\w+)/.exec(cookie)?.[1];
 
 const PRODUCT = (form: string) => `<title>Product</title><h1>Fake Duffle Bag</h1>
@@ -25,6 +31,42 @@ const PRODUCT = (form: string) => `<title>Product</title><h1>Fake Duffle Bag</h1
     <input name="qty" value="1">
     <button type="submit" id="product-addtocart-button">Add to Cart</button>
   </form>`;
+
+// A configurable product: Color (attribute 93: Purple 57, White 59) x Size (143: XS 166, M 168).
+// White/M is out of stock. Variant SKUs: T-<size>-<color>.
+const COLOR = { 57: 'Purple', 59: 'White' } as Record<number, string>;
+const SIZE = { 166: 'XS', 168: 'M' } as Record<number, string>;
+const CONFIGURABLE = {
+  __typename: 'ConfigurableProduct',
+  sku: 'T',
+  configurable_options: [
+    { attribute_id: '93', attribute_code: 'color', label: 'Color', values: [{ value_index: 57, label: 'Purple' }, { value_index: 59, label: 'White' }] },
+    { attribute_id: '143', attribute_code: 'size', label: 'Size', values: [{ value_index: 166, label: 'XS' }, { value_index: 168, label: 'M' }] },
+  ],
+  variants: [57, 59].flatMap((color) =>
+    [166, 168].map((size) => ({
+      attributes: [{ code: 'color', value_index: color }, { code: 'size', value_index: size }],
+      product: { sku: `T-${SIZE[size]}-${COLOR[color]}`, stock_status: color === 59 && size === 168 ? 'OUT_OF_STOCK' : 'IN_STOCK' },
+    })),
+  ),
+};
+// Hyvä renders the options as radio inputs inside the form.
+const radios = (attr: number, values: Record<number, string>) =>
+  Object.entries(values)
+    .map(([v, l]) => `<label><input type="radio" name="super_attribute[${attr}]" value="${v}" required>${l}</label>`)
+    .join('');
+// Luma renders swatches with JS after load; clicking one fills an input in the form.
+const LUMA_SWATCHES = `<div class="swatch-opt"></div><script>setTimeout(() => {
+  const html = [[93, ${JSON.stringify(COLOR)}], [143, ${JSON.stringify(SIZE)}]].map(([id, values]) =>
+    '<div class="swatch-attribute" data-attribute-id="' + id + '">' +
+      Object.entries(values).map(([v, l]) => '<div class="swatch-option" data-option-id="' + v + '">' + l + '</div>').join('') +
+      '<input class="super-attribute-select" name="super_attribute[' + id + ']" type="text" style="width:0;opacity:0">' +
+    '</div>').join('');
+  document.querySelector('.swatch-opt').innerHTML = html;
+  document.querySelectorAll('.swatch-option').forEach((el) => el.addEventListener('click', () => {
+    el.closest('.swatch-attribute').querySelector('input').value = el.dataset.optionId;
+  }));
+}, 200)</script>`;
 
 const CHECKOUT = `<title>Checkout</title>
 <div class="loading-mask" style="display:none">Loading...</div>
@@ -109,6 +151,23 @@ function startStore(): Promise<Server> {
                 '<input type="hidden" name="super_attribute[93]" class="mage-error"><div class="mage-error">This is a required field.</div>';
             });</script>`,
         );
+      case '/radios.html':
+      case '/wrong-variant.html':
+        return html(PRODUCT(radios(93, COLOR) + radios(143, SIZE)));
+      case '/luma-swatches.html':
+        return html(PRODUCT(LUMA_SWATCHES));
+      case '/graphql': {
+        let body = '';
+        req.on('data', (c) => (body += c));
+        req.on('end', () => {
+          const { variables } = JSON.parse(body) as { variables: { url?: string } };
+          const product = /radios|luma-swatches|wrong-variant/.test(variables.url ?? '')
+            ? CONFIGURABLE
+            : { __typename: 'SimpleProduct', sku: 'SIMPLE' };
+          res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: { route: product } }));
+        });
+        return;
+      }
       case '/configurable.html':
         return html(PRODUCT('<select name="super_attribute[93]" required><option value="">Color</option></select>'));
       case '/checkout/cart/add': {
@@ -116,7 +175,17 @@ function startStore(): Promise<Server> {
         req.on('data', (c) => (body += c));
         req.on('end', () => {
           const session = sid ?? `s${store.nextSession++}`;
-          store.carts.set(session, (store.carts.get(session) ?? 0) + Number(new URLSearchParams(body).get('qty') ?? 1));
+          const form = new URLSearchParams(body);
+          store.carts.set(session, (store.carts.get(session) ?? 0) + Number(form.get('qty') ?? 1));
+          const color = Number(form.get('super_attribute[93]'));
+          const size = Number(form.get('super_attribute[143]'));
+          // "Theme bug" fixture: this page always adds XS/Purple, whatever was chosen.
+          const sku = (req.headers.referer ?? '').includes('wrong-variant')
+            ? 'T-XS-Purple'
+            : color && size
+              ? `T-${SIZE[size]}-${COLOR[color]}`
+              : 'SIMPLE';
+          store.skus.set(session, [...(store.skus.get(session) ?? []), sku]);
           res.writeHead(302, { location: '/checkout/cart/', 'set-cookie': `sid=${session}; Path=/` }).end();
         });
         return;
@@ -125,7 +194,15 @@ function startStore(): Promise<Server> {
         return html('<title>Cart</title><h1>Shopping Cart</h1>');
       case '/customer/section/load/':
         res.writeHead(200, { 'content-type': 'application/json' });
-        return res.end(JSON.stringify({ cart: { summary_count: qty, subtotal: `<span class="price">$${34 * qty}.00</span>` } }));
+        return res.end(
+          JSON.stringify({
+            cart: {
+              summary_count: qty,
+              subtotal: `<span class="price">$${34 * qty}.00</span>`,
+              items: ((sid && store.skus.get(sid)) || []).map((sku) => ({ product_sku: sku })),
+            },
+          }),
+        );
       case '/checkout/':
         if (qty === 0) return res.writeHead(302, { location: '/checkout/cart/' }).end();
         return html(CHECKOUT);
@@ -183,7 +260,7 @@ afterAll(async () => {
   await new Promise((r) => site.close(r));
 });
 beforeEach(() => {
-  Object.assign(store, { carts: new Map(), ordered: false, orderRequests: 0 });
+  Object.assign(store, { carts: new Map(), skus: new Map(), ordered: false, orderRequests: 0 });
 });
 
 describe('magento_guest_checkout', () => {
@@ -239,6 +316,36 @@ describe('magento_guest_checkout', () => {
     expect(r.isError).toBe(true);
     expect(r.text).toContain('Required fields not filled: super_attribute[93]');
     expect(r.text).toContain('Product has options to choose');
+  });
+
+  it('chooses configurable options on Hyvä-style radios and checks the variant in the cart', async () => {
+    const first = await call({ productUrl: `${origin}/radios.html`, options: 'first' });
+    expect(first.isError).toBeUndefined();
+    expect(first.text).toContain('[Color: Purple, Size: XS (T-XS-Purple)] | cart: 1 item(s)');
+    const chosen = await call({ productUrl: `${origin}/radios.html`, options: { size: 'm', Color: 'Purple' } });
+    expect(chosen.text).toContain('[Color: Purple, Size: M (T-M-Purple)]');
+  });
+
+  it('clicks Luma swatches that are rendered after load', async () => {
+    const r = await call({ productUrl: `${origin}/luma-swatches.html`, options: { Color: 'White', Size: 'XS' } });
+    expect(r.isError).toBeUndefined();
+    expect(r.text).toContain('[Color: White, Size: XS (T-XS-White)] | cart: 1 item(s)');
+  });
+
+  it('explains unknown values and out-of-stock combinations before touching the page', async () => {
+    const unknown = await call({ productUrl: `${origin}/radios.html`, options: { Size: 'XXL' } });
+    expect(unknown.text).toContain('"XXL" is not a value of Size. Options: Color (Purple, White); Size (XS, M)');
+    const soldOut = await call({ productUrl: `${origin}/radios.html`, options: { Color: 'White', Size: 'M' } });
+    expect(soldOut.text).toContain('Color White, Size M is out of stock (T-M-White)');
+    // Only one attribute given: the other one comes from the first in-stock match.
+    const partial = await call({ productUrl: `${origin}/radios.html`, options: { Color: 'White' } });
+    expect(partial.text).toContain('(T-XS-White)');
+  });
+
+  it('catches a store that adds a different variant than the one chosen', async () => {
+    const r = await call({ productUrl: `${origin}/wrong-variant.html`, options: { Size: 'M' } });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('Cart holds T-XS-Purple instead of the chosen variant T-M-Purple');
   });
 
   it('lists the offered shipping methods when the requested one is missing', async () => {

@@ -2,6 +2,14 @@
 
 All notable changes to this project. Versions follow [semantic versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+- `magento_guest_checkout` and `magento.checkout()` take `options` for configurable products: `"first"` (first in-stock variant) or attribute → value labels such as `{ "Size": "M", "Color": "Blue" }`. Values and stock come from GraphQL; the options are chosen on the page (Luma swatches, Hyvä radios, dropdowns), and the cart is checked to hold the chosen variant's SKU.
+
+### Fixed
+- After a successful add to cart Hyvä resets the product form; the leftover "invalid" option fields no longer make the checkout report an empty cart.
+
 ## [0.1.0] - unreleased
 
 First public version.
