@@ -62,7 +62,8 @@ export async function checkUrlCache(request: APIRequestContext, url: string, req
 
   const headers = last!.headers();
   report.layer = detectLayer(headers);
-  report.cacheControl = headers['x-magento-cache-control'] ?? headers['cache-control'];
+  // Behind a proxy the client-facing Cache-Control is the proxy's rewrite, not Magento's: do not show it.
+  report.cacheControl = headers['x-magento-cache-control'] ?? (isProxied(headers) ? undefined : headers['cache-control']);
   const tags = headers['x-magento-tags'];
   report.tags = tags ? tags.split(',').filter(Boolean).length : undefined;
   const finalHop = report.hops[report.hops.length - 1]!;
@@ -80,12 +81,16 @@ export async function checkUrlCache(request: APIRequestContext, url: string, req
   }
 
   const uncacheableReason = magentoSaysUncacheable(headers);
+  const privatePath = PRIVATE_PATHS.test(new URL(url).pathname);
+  // Magento sends its own verdict (X-Magento-Cache-Control) only in developer mode; behind a proxy
+  // the client-facing Cache-Control is rewritten, so in production the reason is not visible.
+  const magentoVerdictHidden = !headers['x-magento-cache-control'] && isProxied(headers);
   if (finalHop.cache === 'HIT') {
     report.verdict = 'CACHED';
   } else if (uncacheableReason) {
     report.verdict = 'NOT_CACHEABLE';
     report.notes.push(uncacheableReason);
-    if (PRIVATE_PATHS.test(new URL(url).pathname)) {
+    if (privatePath) {
       report.notes.push('expected: Magento never caches cart/checkout/customer pages');
     } else {
       report.notes.push(
@@ -93,9 +98,21 @@ export async function checkUrlCache(request: APIRequestContext, url: string, req
           'search the layout XML of this page type for cacheable="false"',
       );
     }
+  } else if (finalHop.cache === 'MISS' && privatePath && magentoVerdictHidden) {
+    report.verdict = 'NOT_CACHEABLE';
+    report.notes.push(
+      'expected: Magento never caches cart/checkout/customer pages ' +
+        '(inferred from the URL: production mode hides X-Magento-Cache-Control)',
+    );
   } else if (finalHop.cache === 'MISS') {
     report.verdict = 'MISS';
-    report.notes.push(`still MISS after ${requests} requests although the page looks cacheable`);
+    report.notes.push(`still MISS after ${requests} requests`);
+    if (magentoVerdictHidden) {
+      report.notes.push(
+        'Magento\'s own cacheability is hidden (X-Magento-Cache-Control is sent in developer mode only); ' +
+          'usual causes: a layout block with cacheable="false", or a session started on the page',
+      );
+    }
     if (report.setCookies.length > 0) {
       report.notes.push(`response sets cookies (${report.setCookies.join(', ')}): Varnish does not store such responses`);
     }
@@ -109,7 +126,7 @@ export async function checkUrlCache(request: APIRequestContext, url: string, req
     );
   }
   if (report.tags === undefined && report.verdict !== 'NOT_CACHEABLE') {
-    report.notes.push('no X-Magento-Tags header: Magento did not tag this page for cache invalidation');
+    report.notes.push('no X-Magento-Tags header: the page is not tagged for invalidation (or the proxy strips the header)');
   }
   return report;
 }
@@ -171,11 +188,16 @@ export function detectLayer(h: Record<string, string>): string | undefined {
   return undefined;
 }
 
+function isProxied(h: Record<string, string>): boolean {
+  const layer = detectLayer(h);
+  return layer !== undefined && layer !== 'Magento built-in FPC';
+}
+
 function magentoSaysUncacheable(h: Record<string, string>): string | undefined {
   const fromMagento = h['x-magento-cache-control'];
   // Behind Varnish the client always sees "no-store" (the VCL rewrites it), so Cache-Control is
   // only trustworthy when no proxy is in front or Magento's original copy is exposed.
-  const proxied = detectLayer(h) !== undefined && detectLayer(h) !== 'Magento built-in FPC';
+  const proxied = isProxied(h);
   const value = fromMagento ?? (proxied ? undefined : h['cache-control']);
   if (!value) return undefined;
   if (/\b(private|no-store|no-cache)\b/i.test(value) || /\bmax-age=0\b/.test(value)) {

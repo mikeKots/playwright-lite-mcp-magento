@@ -177,7 +177,12 @@ export async function magentoGuestCheckout(page: Page, opts: GuestCheckoutOption
           'add_to_cart',
           'Cart is still empty after clicking Add to Cart.' +
             (invalid ? ` Required fields not filled: ${invalid}.` : '') +
-            (messages ? ` Store says: ${messages}` : ''),
+            (messages ? ` Store says: ${messages}` : '') +
+            // Luma renders swatch inputs with JS after load, so the pre-check above can miss them.
+            (/super_attribute|bundle_option/.test(invalid ?? '')
+              ? ' Product has options to choose (configurable/bundle): pass a simple product URL, ' +
+                'or use browser_run to pick the options first.'
+              : ''),
         );
       }
       report.cart = cart;

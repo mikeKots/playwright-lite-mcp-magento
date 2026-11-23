@@ -53,6 +53,17 @@ Same task on both servers: guest checkout of a simple product up to the payment 
 
 Tokens are estimated as characters / 4. The official server gets its cheapest realistic sequence (a snapshot only when element refs are needed, one `fill_form` for all address fields); each of its three page snapshots alone is ~4,300 tokens. A real agent also re-sends the growing conversation with each of those 16 model requests, so the real difference is bigger.
 
+## Tested on
+
+| Store | Mode | Result |
+|---|---|---|
+| Mage-OS 4.0.0 (Magento 2.4.x) + Hyvä 1.5, Varnish | developer | all tools pass |
+| same store, Hyvä | production | all tools pass |
+| same store, Luma | developer | all tools pass |
+| Adobe Commerce Cloud (Fastly), Hyvä Checkout | — | not tested yet: reports and PRs welcome |
+
+The demo store and the checks are in [sample-store/](sample-store/README.md): `sample-store/check.sh` runs every tool against a store over MCP.
+
 ## Why another one, when there is the official @playwright/mcp
 
 The official server is general-purpose, and therefore heavy: large page snapshots and many tools eat the agent's context. This server gives three things:
@@ -332,12 +343,16 @@ Rules: describe the input with a zod schema with `.describe()` on every field (t
 
 Versions follow [semantic versioning](https://semver.org), starting at `0.1.0` (`0.x` = the tool set may still change). `CHANGELOG.md` lists the changes. To release:
 
+`main` is protected, so a version bump goes through a pull request like any other change, and the tag is pushed after the merge:
+
 ```bash
-npm version patch        # or minor; updates package.json and creates the git tag
-git push --follow-tags
+git switch -c release/0.1.1 origin/main
+npm version patch --no-git-tag-version      # or minor; edits package.json + package-lock.json
+# move the CHANGELOG "unreleased" notes under the new version, commit, push, open a PR, merge it
+git fetch origin && git tag v0.1.1 origin/main && git push origin v0.1.1
 ```
 
-The `Release` workflow then tests, builds and pushes the Docker image to GitHub Container Registry, creates a GitHub release and, when the `NPM_TOKEN` secret is set, publishes the npm package (so it can also run with `npx playwright-lite-mcp`). `CI` runs typecheck, tests, build and a Docker build on every push and pull request.
+The `Release` workflow (started by the tag) then tests, builds and pushes the Docker image to GitHub Container Registry, creates a GitHub release and, when the `NPM_TOKEN` secret is set, publishes the npm package (so it can also run with `npx playwright-lite-mcp`). `CI` runs typecheck, tests, build and a Docker build on every push and pull request.
 
 ## What's next
 

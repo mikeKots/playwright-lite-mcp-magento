@@ -98,6 +98,17 @@ function startStore(): Promise<Server> {
     switch (url.pathname) {
       case '/simple.html':
         return html(PRODUCT(''));
+      case '/swatches.html':
+        // Luma: swatch inputs do not exist when the page loads (so the pre-check misses them); jQuery
+        // validation then blocks the submit and marks the field with .mage-error.
+        return html(
+          PRODUCT('<div class="swatch-opt"></div>') +
+            `<script>document.querySelector('#product_addtocart_form').addEventListener('submit', (e) => {
+              e.preventDefault();
+              document.querySelector('.swatch-opt').innerHTML =
+                '<input type="hidden" name="super_attribute[93]" class="mage-error"><div class="mage-error">This is a required field.</div>';
+            });</script>`,
+        );
       case '/configurable.html':
         return html(PRODUCT('<select name="super_attribute[93]" required><option value="">Color</option></select>'));
       case '/checkout/cart/add': {
@@ -221,6 +232,13 @@ describe('magento_guest_checkout', () => {
     expect(r.isError).toBe(true);
     expect(r.text).toContain('FAILED at add_to_cart: Product has options to choose');
     expect(Date.now() - started).toBeLessThan(4_000);
+  });
+
+  it('explains options also when they are rendered after load (Luma swatches)', async () => {
+    const r = await call({ productUrl: `${origin}/swatches.html` });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('Required fields not filled: super_attribute[93]');
+    expect(r.text).toContain('Product has options to choose');
   });
 
   it('lists the offered shipping methods when the requested one is missing', async () => {

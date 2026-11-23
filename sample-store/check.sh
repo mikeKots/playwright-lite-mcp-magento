@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Verifies the sample store and then playwright-lite-mcp against it.
 # Usage: sample-store/check.sh [base-url]     (default: https://app.hyva-demo.test)
+# Env:   EXPECT_THEME=Hyva/default (default) | Magento/luma | any   theme the store must run
 set -uo pipefail
 
 BASE="${1:-https://app.hyva-demo.test}"
@@ -18,7 +19,15 @@ home="$(curl -s "$BASE/")"
 code="$(status "$BASE/")"
 [[ "$code" == 200 ]] && pass "home 200" || fail "home returned $code (TLS? run: warden sign-certificate hyva-demo.test)"
 
-grep -qi 'hyva' <<<"$home" && pass "Hyvä theme active" || fail "no Hyvä markup on home page (design/theme/theme_id?)"
+# The theme shows in static asset URLs (/static/<version>/frontend/<Vendor>/<theme>/...). Matching
+# "hyva" anywhere in the HTML is not enough: the demo store's own domain contains it.
+expect="${EXPECT_THEME:-Hyva/default}"
+theme="$(grep -o -E '/frontend/[A-Za-z0-9_]+/[A-Za-z0-9_]+/' <<<"$home" | sort | uniq -c | sort -rn | awk 'NR==1{print $2}' | cut -d/ -f3,4)"
+if [[ "$expect" == any || "$theme" == "$expect" ]]; then
+  pass "theme ${theme:-unknown}"
+else
+  fail "theme is ${theme:-unknown}, expected $expect (design/theme/theme_id? or set EXPECT_THEME)"
+fi
 
 search="$(curl -s "$BASE/catalogsearch/result/?q=bag")"
 grep -q 'Duffle Bag' <<<"$search" && pass "search finds sample products" \
