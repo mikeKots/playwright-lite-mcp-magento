@@ -33,3 +33,12 @@ jobs:
         run: |
           echo '' | docker run -i --rm -e PW_ALLOWED_ORIGINS=https://example.com playwright-lite-mcp:ci 2>&1 | tee out.log
           grep -q '"server ready"' out.log
+      - name: HTTP transport starts in the image
+        run: |
+          docker run -d --name mcp-http -p 8940:8940 -e PW_ALLOWED_ORIGINS=https://example.com \
+            -e MCP_TRANSPORT=http -e MCP_HTTP_HOST=0.0.0.0 -e MCP_HTTP_TOKEN=ci-token-0123456789abcdef \
+            playwright-lite-mcp:ci
+          for i in $(seq 1 20); do curl -fs http://localhost:8940/healthz && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8940/mcp -d '{}')" = 401
+          docker logs mcp-http 2>&1 | grep -q '"server ready"'
+          docker rm -f mcp-http

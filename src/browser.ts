@@ -18,7 +18,42 @@ const MAX_BUFFERED_ERRORS = 50;
 const MAX_ERROR_LENGTH = 500;
 
 /**
- * Owns one browser, one context and one page.
+ * One browser process shared by several sessions (HTTP transport): launched on first use,
+ * relaunched after a crash. Sessions get their own contexts, so cookies and carts never mix.
+ */
+export class SharedBrowser {
+  private browser: Browser | undefined;
+  private launching: Promise<Browser> | undefined;
+
+  constructor(
+    private readonly cfg: Config,
+    private readonly log: Logger,
+  ) {}
+
+  get(): Promise<Browser> {
+    if (this.browser?.isConnected()) return Promise.resolve(this.browser);
+    this.launching ??= ENGINES[this.cfg.PW_BROWSER]
+      .launch({ headless: this.cfg.PW_HEADLESS })
+      .then((browser) => {
+        this.log.info('launched shared browser', { engine: this.cfg.PW_BROWSER, headless: this.cfg.PW_HEADLESS });
+        this.browser = browser;
+        return browser;
+      })
+      .finally(() => {
+        this.launching = undefined;
+      });
+    return this.launching;
+  }
+
+  async close(): Promise<void> {
+    const browser = this.browser ?? (await this.launching?.catch(() => undefined));
+    this.browser = undefined;
+    await browser?.close().catch(() => undefined);
+  }
+}
+
+/**
+ * Owns one browser (or uses a SharedBrowser's), one context and one page.
  * Everything is created lazily on the first tool call (a fast MCP handshake),
  * and re-created automatically if the browser crashes or the page is closed.
  */
@@ -29,10 +64,13 @@ export class BrowserSession {
   private starting: Promise<Page> | undefined;
   private errors: string[] = [];
   private consentGiven = false;
+  private onDisconnect: (() => void) | undefined;
 
   constructor(
     private readonly cfg: Config,
     private readonly log: Logger,
+    /** When set, the browser process belongs to it: close() then closes only this session's context. */
+    private readonly shared?: SharedBrowser,
   ) {}
 
   async getPage(): Promise<Page> {
@@ -113,7 +151,9 @@ export class BrowserSession {
     await this.reset();
     const browser = this.browser;
     this.browser = undefined;
-    await browser?.close().catch(() => undefined);
+    if (this.onDisconnect) browser?.off('disconnected', this.onDisconnect);
+    this.onDisconnect = undefined;
+    if (!this.shared) await browser?.close().catch(() => undefined);
   }
 
   private async start(): Promise<Page> {
@@ -129,16 +169,26 @@ export class BrowserSession {
   }
 
   private async launchBrowser(): Promise<Browser> {
-    this.log.info('launching browser', { engine: this.cfg.PW_BROWSER, headless: this.cfg.PW_HEADLESS });
-    const browser = await ENGINES[this.cfg.PW_BROWSER].launch({ headless: this.cfg.PW_HEADLESS });
-    browser.on('disconnected', () => {
+    let browser: Browser;
+    if (this.shared) {
+      browser = await this.shared.get();
+    } else {
+      this.log.info('launching browser', { engine: this.cfg.PW_BROWSER, headless: this.cfg.PW_HEADLESS });
+      browser = await ENGINES[this.cfg.PW_BROWSER].launch({ headless: this.cfg.PW_HEADLESS });
+    }
+    if (this.browser === browser) return browser;
+    // A shared browser outlives this session: the listener is removed again in close().
+    if (this.onDisconnect) this.browser?.off('disconnected', this.onDisconnect);
+    const onDisconnect = () => {
       if (this.browser !== browser) return;
       this.log.warn('browser disconnected, it will be relaunched on the next tool call');
       this.browser = undefined;
       this.context = undefined;
       this.page = undefined;
       this.consentGiven = false;
-    });
+    };
+    browser.on('disconnected', onDisconnect);
+    this.onDisconnect = onDisconnect;
     this.browser = browser;
     return browser;
   }

@@ -1,56 +1,53 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
-import { McpServer } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { BrowserSession } from './browser.js';
 import { loadConfig } from './config.js';
+import { startHttpServer } from './http.js';
 import { createLogger } from './logger.js';
-import { Mutex } from './mutex.js';
-import { registerTools } from './tools.js';
+import { VERSION, createMcpServer } from './server.js';
 
 const SHUTDOWN_TIMEOUT_MS = 5_000;
-// package.json sits next to dist/ in the repo, the npm package and the Docker image.
-const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
   const log = createLogger(cfg.LOG_LEVEL);
-  const browser = new BrowserSession(cfg, log);
 
-  const server = new McpServer(
-    { name: 'playwright-lite', version },
-    {
-      instructions:
-        'Browser automation. Typical flow: browser_navigate -> browser_snapshot -> browser_click / browser_fill. ' +
-        'Prefer { role, name } targets from the snapshot over CSS selectors. ' +
-        'Use page_health_check for quick smoke tests of several pages. Only allowlisted origins can be opened.' +
-        (cfg.PW_ALLOW_SCRIPTS
-          ? ' For multi-step flows prefer browser_run: one Playwright script, one call, only the result comes back.'
-          : ''),
-    },
-  );
-  registerTools(server, { cfg, log, browser, mutex: new Mutex() });
-
+  let closeAll: () => Promise<void> = async () => undefined;
   let shuttingDown = false;
-  const shutdown = async (reason: string, exitCode = 0): Promise<void> => {
+  async function shutdown(reason: string, exitCode = 0): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     log.info('shutting down', { reason });
     // Never hang forever on a stuck browser: a zombie Chromium is worse than a hard exit.
     setTimeout(() => process.exit(exitCode || 1), SHUTDOWN_TIMEOUT_MS).unref();
     try {
-      await browser.close();
-      await server.close();
+      await closeAll();
     } catch (err) {
       log.error('error during shutdown', { error: String(err) });
     }
     process.exit(exitCode);
-  };
+  }
+
+  let ready: Record<string, unknown>;
+  if (cfg.MCP_TRANSPORT === 'http') {
+    const http = await startHttpServer(cfg, log);
+    closeAll = () => http.close();
+    ready = { url: http.url, maxSessions: cfg.MCP_MAX_SESSIONS };
+  } else {
+    const browser = new BrowserSession(cfg, log);
+    const server = createMcpServer(cfg, log, browser);
+    closeAll = async () => {
+      await browser.close();
+      await server.close();
+    };
+    // The client (Claude Code) closed our stdin: the session is over, clean up the browser.
+    process.stdin.on('close', () => void shutdown('stdin closed'));
+    await server.connect(new StdioServerTransport());
+    ready = {};
+  }
 
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  // The client (Claude Code) closed our stdin: the session is over, clean up the browser.
-  process.stdin.on('close', () => void shutdown('stdin closed'));
   process.on('uncaughtException', (err) => {
     log.error('uncaught exception', { error: err.stack ?? String(err) });
     void shutdown('uncaughtException', 1);
@@ -59,12 +56,13 @@ async function main(): Promise<void> {
     log.error('unhandled rejection', { error: String(reason) });
   });
 
-  await server.connect(new StdioServerTransport());
   log.info('server ready', {
-    version,
+    version: VERSION,
+    transport: cfg.MCP_TRANSPORT,
     engine: cfg.PW_BROWSER,
     allowedOrigins: cfg.PW_ALLOWED_ORIGINS,
     scripts: cfg.PW_ALLOW_SCRIPTS,
+    ...ready,
   });
 }
 
