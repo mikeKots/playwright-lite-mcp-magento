@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { BrowserSession } from './browser.js';
 import { loadConfig } from './config.js';
 import { createLogger } from './logger.js';
+import { unsupportedHint } from './magento.js';
 import { Mutex } from './mutex.js';
 import { registerTools } from './tools.js';
 
@@ -308,6 +309,7 @@ describe('magento_guest_checkout', () => {
     const r = await call({ productUrl: `${origin}/configurable.html` });
     expect(r.isError).toBe(true);
     expect(r.text).toContain('FAILED at add_to_cart: Product has options to choose');
+    expect(r.text).toContain('Use browser_run to script it.');
     expect(Date.now() - started).toBeLessThan(4_000);
   });
 
@@ -408,5 +410,13 @@ describe('browser_run magento helpers (code mode)', () => {
     const relative = await script(`return magento.url('/checkout/');`);
     expect(relative.isError).toBe(true);
     expect(relative.text).toContain('pass absolute URLs or call page.goto');
+  });
+});
+
+describe('unsupportedHint', () => {
+  it('points to browser_run only when code mode is on', () => {
+    expect(unsupportedHint(true)).toBe('Use browser_run to script it.');
+    expect(unsupportedHint(false)).toContain('needs PW_ALLOW_SCRIPTS=true, stdio only');
+    expect(unsupportedHint(undefined)).toContain('test it manually');
   });
 });

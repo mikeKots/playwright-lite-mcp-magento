@@ -5,6 +5,7 @@ All notable changes to this project. Versions follow [semantic versioning](https
 ## [Unreleased]
 
 ### Added
+- Claude Code plugin: `/plugin install playwright-lite-mcp --marketplace mikeKots/playwright-lite-mcp-magento` installs the MCP server (the Docker image over stdio, configured through the plugin options: allowed origins, code mode, a local store hostname, HTTPS errors) and the `magento-qa` skill, a QA playbook for the agent.
 - HTTP transport: `MCP_TRANSPORT=http` serves Streamable HTTP on `/mcp` with a required bearer token (`MCP_HTTP_TOKEN`), Host/Origin checks against DNS rebinding, one browser context per MCP session (one shared browser process), a session limit, idle expiry and `GET /healthz`. `browser_run` is never available over HTTP: the server refuses to start with `PW_ALLOW_SCRIPTS=true`.
 - `sample-store/mcp-smoke.mjs --http` runs the smoke test over the HTTP transport (also with `--docker`); CI starts the image in HTTP mode.
 - `magento_product_check` and `magento.product()`: price and stock of each product page compared with Magento GraphQL, as a guest. Verdict per product (OK / MISMATCH / UNKNOWN / ERROR) with likely causes (stale full page cache, tax display, indexer, special price); flags zero prices, configurables without in-stock variants, a missing Add to Cart button, and JSON-LD / `product:price` meta that disagree with GraphQL. Works with Luma and Hyvä.
@@ -14,6 +15,8 @@ All notable changes to this project. Versions follow [semantic versioning](https
 - After a successful add to cart Hyvä resets the product form; the leftover "invalid" option fields no longer make the checkout report an empty cart.
 
 ### Changed
+- Unsupported cases (bundle products, Hyvä Checkout) suggest `browser_run` only when code mode is enabled; otherwise they say how to enable it.
+- README: "What's next" removed; Hyvä Checkout and bundle products listed as known limitations.
 - `@modelcontextprotocol/server` ^2.4.0 (required by `@modelcontextprotocol/node`), `zod` ^4.6.6 (GHSA-mrhx-c7xc-m3w5).
 
 ## [0.1.0] - unreleased

@@ -1,0 +1,47 @@
+{
+  "name": "playwright-lite-mcp",
+  "displayName": "Playwright Lite MCP for Magento",
+  "description": "Token-efficient Magento / Adobe Commerce QA: guest checkout, full page cache, price and stock, GraphQL and page health checks in one call each, plus Playwright code mode. Ships the MCP server (Docker) and a QA playbook skill.",
+  "author": {
+    "name": "Mykhailo Kots",
+    "url": "https://github.com/mikeKots"
+  },
+  "homepage": "https://github.com/mikeKots/playwright-lite-mcp-magento#readme",
+  "repository": "https://github.com/mikeKots/playwright-lite-mcp-magento",
+  "license": "MIT",
+  "keywords": [
+    "magento",
+    "adobe-commerce",
+    "mage-os",
+    "hyva",
+    "qa",
+    "playwright",
+    "mcp"
+  ],
+  "userConfig": {
+    "allowed_origins": {
+      "type": "string",
+      "title": "Allowed store origins",
+      "description": "Comma-separated origins the browser may open, e.g. https://staging.example.com,https://*.example.com",
+      "required": true
+    },
+    "allow_scripts": {
+      "type": "boolean",
+      "title": "Code mode (browser_run)",
+      "description": "Enable browser_run: the agent's Playwright scripts run inside the container. Recommended, it saves the most tokens on multi-page work.",
+      "default": true
+    },
+    "local_store_host": {
+      "type": "string",
+      "title": "Local store hostname",
+      "description": "Hostname of a store running on this machine (Warden, DDEV, Valet), e.g. app.mystore.test: the container resolves it to the host. Keep the default for remote stores.",
+      "default": "host.docker.internal"
+    },
+    "ignore_https_errors": {
+      "type": "boolean",
+      "title": "Ignore HTTPS errors",
+      "description": "Accept self-signed certificates: needed for local dev stores, whose CA the container does not trust. Never for real sites.",
+      "default": false
+    }
+  }
+}

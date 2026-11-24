@@ -150,6 +150,7 @@ export function createMagentoHelpers(page: Page, cfg: Config, browser: BrowserSe
           productUrl,
           stepTimeoutMs: cfg.PW_NAV_TIMEOUT_MS,
           drainConsole: drainErrors,
+          codeMode: true,
           afterNavigate: (p) =>
             cfg.PW_COOKIE_ACCEPT.length > 0
               ? acceptCookieBanner(p, cfg.PW_COOKIE_ACCEPT, cfg.PW_COOKIE_WAIT_MS)

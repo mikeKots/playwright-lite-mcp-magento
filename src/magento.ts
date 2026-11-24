@@ -43,6 +43,8 @@ export interface GuestCheckoutOptions {
   afterNavigate?: (page: Page) => Promise<unknown>;
   /** Returns console errors collected since the previous call; used to attribute errors to steps. */
   drainConsole?: () => string[];
+  /** Whether browser_run (code mode) is available, so unsupported cases can point to it. */
+  codeMode?: boolean;
 }
 
 export interface CheckoutReport {
@@ -81,7 +83,14 @@ const LOADER = '.loading-mask, .loader, [data-role="loader"]';
 const MAX_FAILED_REQUESTS = 20;
 const OPTIONS_HINT =
   'Product has options to choose: pass options: "first" (first in-stock variant) or e.g. { "Size": "M", "Color": "Blue" }. ' +
-  'Bundle products: use browser_run.';
+  'Bundle products are not supported.';
+
+/** What to do about a case this tool does not cover: script it with browser_run when code mode is on. */
+export function unsupportedHint(codeMode: boolean | undefined): string {
+  return codeMode
+    ? 'Use browser_run to script it.'
+    : 'Script it with browser_run (needs PW_ALLOW_SCRIPTS=true, stdio only) or test it manually.';
+}
 // Once an order exists Magento deactivates the quote, and the checkout page's last totals /
 // payment-information refresh answers 404. That is normal, not a store bug.
 const CLOSED_QUOTE_REQUEST = /\/V1\/guest-carts\/[^/]+\//;
@@ -181,13 +190,13 @@ export async function magentoGuestCheckout(page: Page, opts: GuestCheckoutOption
           report.chosenOptions = `${chosen.summary} (${chosen.sku})`;
           chosenSku = chosen.sku;
         } else if (product.type === 'BundleProduct') {
-          throw new StepError('add_to_cart', `Bundle products are not supported: use browser_run to pick the bundle items.`);
+          throw new StepError('add_to_cart', `Bundle products are not supported. ${unsupportedHint(opts.codeMode)}`);
         }
       } else {
         const optionFields = await page
           .locator('#product_addtocart_form [name^="super_attribute"], #product_addtocart_form [name^="bundle_option"]')
           .count();
-        if (optionFields > 0) throw new StepError('add_to_cart', OPTIONS_HINT);
+        if (optionFields > 0) throw new StepError('add_to_cart', `${OPTIONS_HINT} ${unsupportedHint(opts.codeMode)}`);
       }
       if (opts.qty !== undefined) {
         const qty = page.locator('#product_addtocart_form input[name="qty"], input[name="qty"]').first();
@@ -204,7 +213,7 @@ export async function magentoGuestCheckout(page: Page, opts: GuestCheckoutOption
             (invalid ? ` Required fields not filled: ${invalid}.` : '') +
             (messages ? ` Store says: ${messages}` : '') +
             // Luma renders swatch inputs with JS after load, so the pre-check above can miss them.
-            (/super_attribute|bundle_option/.test(invalid ?? '') ? ` ${OPTIONS_HINT}` : ''),
+            (/super_attribute|bundle_option/.test(invalid ?? '') ? ` ${OPTIONS_HINT} ${unsupportedHint(opts.codeMode)}` : ''),
         );
       }
       report.cart = cart;
@@ -228,7 +237,7 @@ export async function magentoGuestCheckout(page: Page, opts: GuestCheckoutOption
         if ((await page.locator('#hyva-checkout-main, [wire\\:id]').count()) > 0) {
           throw new StepError(
             'checkout_load',
-            'Hyvä Checkout (Magewire) detected: only the standard Magento_Checkout is supported. Use browser_run.',
+            `Hyvä Checkout (Magewire) detected: only the standard Magento_Checkout is supported. ${unsupportedHint(opts.codeMode)}`,
           );
         }
         throw new StepError('checkout_load', 'Shipping address form (#shipping-new-address-form) did not appear.');
