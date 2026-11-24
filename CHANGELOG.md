@@ -4,6 +4,11 @@ All notable changes to this project. Versions follow [semantic versioning](https
 
 ## [Unreleased]
 
+### Changed
+- CI validates the Claude Code plugin manifests (`claude plugin validate .`) on every push and pull request.
+- GitHub Actions upgraded to their Node 24 majors (checkout, setup-node, Docker actions, action-gh-release); the release build sets `package-manager-cache: false`.
+- README: npm, CI, Docker image and license badges.
+
 ## [0.1.1] - 2026-11-24
 
 ### Added
