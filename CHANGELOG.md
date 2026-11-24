@@ -4,8 +4,15 @@ All notable changes to this project. Versions follow [semantic versioning](https
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-24
+
+### Added
+- README: quick start with `npx playwright-lite-mcp` (no Docker), including the browser install step.
+
 ### Changed
+- A missing Playwright browser is reported with the exact install command (`npx playwright@<version> install chromium`) instead of a cut-off Playwright banner.
 - Release workflow publishes to npm through trusted publishing (OIDC) instead of an `NPM_TOKEN` secret; each npm version gets a provenance attestation. The release build no longer uses the npm dependency cache.
+- Dev: vitest 5 (fixes the critical tinypool advisories GHSA-5gmw-xhrv-c9v3 and GHSA-85c8-ppgw-ccpr; dev dependencies only, the published package was not affected). Building and testing from source need Node.js 22.12+.
 
 ## [0.1.0] - 2026-11-24
 

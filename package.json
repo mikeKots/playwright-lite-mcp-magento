@@ -1,6 +1,6 @@
 {
   "name": "playwright-lite-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Token-efficient MCP server for Magento / Adobe Commerce QA: health, cache, GraphQL and checkout checks in one call each, plus Playwright code mode",
   "keywords": [
     "mcp",
@@ -51,6 +51,6 @@
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.9.0",
-    "vitest": "^3.2.0"
+    "vitest": "^5.1.1"
   }
 }
