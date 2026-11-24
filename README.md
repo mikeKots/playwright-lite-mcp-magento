@@ -444,4 +444,4 @@ npm version patch --no-git-tag-version      # or minor; edits package.json + pac
 git fetch origin && git tag v0.1.1 origin/main && git push origin v0.1.1
 ```
 
-The `Release` workflow (started by the tag) then tests, builds and pushes the Docker image to GitHub Container Registry, creates a GitHub release and, when the `NPM_TOKEN` secret is set, publishes the npm package (so it can also run with `npx playwright-lite-mcp`). `CI` runs typecheck, tests, build and a Docker build on every push and pull request.
+The `Release` workflow (started by the tag) then tests, builds and pushes the Docker image to GitHub Container Registry, creates a GitHub release and publishes the npm package (so it can also run with `npx playwright-lite-mcp`). npm publishing uses [trusted publishing](https://docs.npmjs.com/trusted-publishers): no token is stored; on npmjs.com the package's trusted publisher is this repository with the workflow `release.yml`, and each version gets a provenance attestation. `CI` runs typecheck, tests, build and a Docker build on every push and pull request.

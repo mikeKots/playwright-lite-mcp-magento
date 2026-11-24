@@ -3,7 +3,8 @@ name: Release
 # Push a tag that matches package.json on main, after the version-bump PR is merged:
 #   git tag v0.1.1 origin/main && git push origin v0.1.1
 # Publishes the Docker image to GitHub Container Registry (ghcr.io/<owner>/<repo>) for amd64 and arm64,
-# and to npm when the NPM_TOKEN secret is set.
+# and the npm package through npm trusted publishing (OIDC: no token; the package's npm settings name this
+# repository and release.yml as its trusted publisher). npm adds a provenance attestation automatically.
 on:
   push:
     tags: ['v*']
@@ -11,19 +12,17 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write # OIDC token for npm trusted publishing
 
 jobs:
   release:
-    runs-on: ubuntu-latest
-    env:
-      # Job-level, so the npm step's `if` can see whether the secret exists.
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    runs-on: ubuntu-latest # trusted publishing works on GitHub-hosted runners only
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          # No dependency cache in a release build: a poisoned cache would end up in the published package.
           registry-url: https://registry.npmjs.org
 
       - name: Tag matches package.json
@@ -59,11 +58,11 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ env.VERSION }}
 
-      - name: Publish to npm
-        if: ${{ env.NPM_TOKEN != '' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+      - name: Publish to npm (trusted publishing)
+        run: |
+          # Trusted publishing needs npm >= 11.5.1; Node 22 ships npm 10.
+          npm install -g npm@^11.5.1
+          npm publish --access public
 
       - uses: softprops/action-gh-release@v2
         with:
