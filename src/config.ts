@@ -1,6 +1,8 @@
 import * as z from 'zod/v4';
 import { isValidPattern } from './security.js';
 
+const MIN_TOKEN_LENGTH = 24;
+
 const EnvSchema = z.object({
   PW_BROWSER: z.enum(['chromium', 'firefox', 'webkit']).default('chromium'),
   PW_HEADLESS: z
@@ -42,6 +44,27 @@ const EnvSchema = z.object({
     .transform((v) => v === 'true'),
   PW_SCRIPT_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+
+  // Transport. stdio (default): one client, the one that started the process. http: Streamable HTTP
+  // on MCP_HTTP_HOST:MCP_HTTP_PORT/mcp, several clients, each MCP session with its own browser context.
+  MCP_TRANSPORT: z.enum(['stdio', 'http']).default('stdio'),
+  MCP_HTTP_HOST: z.string().min(1).default('127.0.0.1'),
+  MCP_HTTP_PORT: z.coerce.number().int().min(0).max(65_535).default(8940),
+  // Required for http: clients send "Authorization: Bearer <token>".
+  MCP_HTTP_TOKEN: z.string().optional(),
+  // Host header names accepted besides localhost (DNS rebinding protection), e.g. "mcp.internal,qa-box".
+  MCP_HTTP_ALLOWED_HOSTS: z
+    .string()
+    .default('')
+    .transform((s) =>
+      s
+        .split(',')
+        .map((x) => x.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  // Each session holds a browser context (~50-150 MB): keep the cap small.
+  MCP_MAX_SESSIONS: z.coerce.number().int().positive().max(100).default(5),
+  MCP_SESSION_IDLE_MS: z.coerce.number().int().positive().default(30 * 60_000),
 });
 
 export type Config = z.infer<typeof EnvSchema>;
@@ -62,6 +85,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const invalid = cfg.PW_ALLOWED_ORIGINS.filter((p) => !isValidPattern(p));
   if (invalid.length > 0) {
     throw new Error(`Invalid PW_ALLOWED_ORIGINS entries: ${invalid.join(', ')}`);
+  }
+  if (cfg.MCP_TRANSPORT === 'http') {
+    if (!cfg.MCP_HTTP_TOKEN || cfg.MCP_HTTP_TOKEN.length < MIN_TOKEN_LENGTH) {
+      throw new Error(
+        `MCP_HTTP_TOKEN is required with MCP_TRANSPORT=http (at least ${MIN_TOKEN_LENGTH} characters), ` +
+          'e.g. the output of: openssl rand -hex 32',
+      );
+    }
+    // browser_run executes agent-written code inside this process: never expose it over the network.
+    if (cfg.PW_ALLOW_SCRIPTS) {
+      throw new Error('PW_ALLOW_SCRIPTS=true is not allowed with MCP_TRANSPORT=http: browser_run is available over stdio only.');
+    }
   }
   return cfg;
 }

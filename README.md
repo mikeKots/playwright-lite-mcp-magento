@@ -28,7 +28,7 @@ claude mcp add -s user playwright-lite -- docker run -i --rm --init \
   ghcr.io/mikekots/playwright-lite-mcp-magento:latest
 ```
 
-Without Docker, see [Step 1](#step-1-install) and [Step 6](#step-6-connect-to-claude-code). A ready-made demo store to try it on: [sample-store/](sample-store/README.md).
+Without Docker, see [Step 1](#step-1-install) and [Step 6](#step-6-connect-to-claude-code). One shared server for a team or a QA box: [HTTP transport](#step-8-http-transport). A ready-made demo store to try it on: [sample-store/](sample-store/README.md).
 
 ## Tools
 
@@ -89,7 +89,9 @@ npm run build
 
 ```
 src/
-  index.ts          entry point: server, stdio transport, graceful shutdown
+  index.ts          entry point: picks the transport, graceful shutdown
+  server.ts         McpServer factory (one per stdio process / per HTTP session)
+  http.ts           Streamable HTTP transport: auth, Host/Origin checks, sessions
   config.ts         env config validated with zod (fail fast)
   security.ts       origin allowlist
   script.ts         code mode: runs the agent's Playwright script (browser_run)
@@ -105,7 +107,7 @@ src/
   mutex.ts          serialized tool execution
   logger.ts         JSON logs to stderr
   errors.ts         turns Playwright errors into short, agent-readable messages
-  *.test.ts         tests: allowlist, cookies, code mode, tool integration, checkout, cache, GraphQL, product
+  *.test.ts         tests: allowlist, cookies, code mode, tool integration, checkout, cache, GraphQL, product, HTTP transport
 sample-store/       demo store (Mage-OS + Hyvä on Warden): setup.sh, check.sh, mcp-smoke.mjs, benchmark.mjs
 .github/workflows/  CI (tests + Docker build) and Release (GHCR image, GitHub release, npm)
 ```
@@ -128,7 +130,7 @@ There is a ready-made store to test against: see [sample-store/README.md](sample
 
 **Resilience.** The browser starts lazily on the first tool call, so the client handshake is fast. If Chromium crashes, it is relaunched on the next call.
 
-**Graceful shutdown.** SIGINT/SIGTERM, a closed stdin (the client ended the session) or an unexpected error close the browser. A hard 5-second timeout makes sure no zombie Chromium is left behind.
+**Graceful shutdown.** SIGINT/SIGTERM, a closed stdin (stdio: the client ended the session) or an unexpected error close the browser (HTTP: every session, then the shared browser). A hard 5-second timeout makes sure no zombie Chromium is left behind.
 
 ## Step 4. Configuration
 
@@ -147,6 +149,13 @@ There is a ready-made store to test against: see [sample-store/README.md](sample
 | `PW_SCRIPT_TIMEOUT_MS` | `60000` | Time limit of one `browser_run` script |
 | `PW_IGNORE_HTTPS_ERRORS` | `false` | `true` accepts self-signed certificates (local Warden/DDEV/Valet stores, mainly inside Docker). Never for real sites |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `MCP_TRANSPORT` | `stdio` | `http` serves Streamable HTTP instead, see [Step 8](#step-8-http-transport) |
+| `MCP_HTTP_HOST` | `127.0.0.1` | Bind address. `0.0.0.0` inside Docker |
+| `MCP_HTTP_PORT` | `8940` | Port; the endpoint is `/mcp`, `/healthz` answers without a token |
+| `MCP_HTTP_TOKEN` | required for http | Bearer token, at least 24 characters (`openssl rand -hex 32`) |
+| `MCP_HTTP_ALLOWED_HOSTS` | none | Extra `Host`/`Origin` hostnames besides localhost and the bind address, comma-separated |
+| `MCP_MAX_SESSIONS` | `5` | Concurrent HTTP sessions; each has its own browser context |
+| `MCP_SESSION_IDLE_MS` | `1800000` | An HTTP session without requests for this long is closed |
 
 Create a `PW_STORAGE_STATE` file with `npx playwright codegen --save-storage=auth-state.json https://your-site`: log in in the window that opens, then close it. The file is in `.gitignore`, since it holds live session cookies.
 
@@ -189,7 +198,32 @@ Details:
 - The image runs headless Chromium only, so `PW_BROWSER=firefox|webkit` does not work in Docker.
 - Check an image end to end: `node sample-store/mcp-smoke.mjs https://app.hyva-demo.test --docker playwright-lite-mcp`.
 
-## Step 8. Code mode (`browser_run`)
+## Step 8. HTTP transport
+
+By default the server speaks stdio: the client starts it, one client per process. With `MCP_TRANSPORT=http` it serves [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http) instead, so one server (a QA box, a Docker host) can serve several agents:
+
+```bash
+TOKEN=$(openssl rand -hex 32)
+docker run -d --name playwright-lite -p 127.0.0.1:8940:8940 \
+  -e MCP_TRANSPORT=http -e MCP_HTTP_HOST=0.0.0.0 -e MCP_HTTP_TOKEN="$TOKEN" \
+  -e PW_ALLOWED_ORIGINS="https://staging.example.com" \
+  ghcr.io/mikekots/playwright-lite-mcp-magento:latest
+
+claude mcp add --transport http -s user playwright-lite http://localhost:8940/mcp \
+  --header "Authorization: Bearer $TOKEN"
+```
+
+How it works:
+- **One browser context per MCP session.** Every client that connects gets its own McpServer, page, cookies, cart and tool queue; all sessions share one Chromium process. Two agents never see each other's checkout.
+- **Bearer token** on every `/mcp` request (`MCP_HTTP_TOKEN`, compared in constant time). Without it: `401`.
+- **DNS rebinding protection.** `Host` and `Origin` must be localhost, the bind address or one of `MCP_HTTP_ALLOWED_HOSTS`; otherwise `403`. Serving it under another name (`http://qa-box:8940/mcp`)? Add `MCP_HTTP_ALLOWED_HOSTS=qa-box`.
+- **No code mode over HTTP.** `browser_run` runs agent code inside the server process, so the server refuses to start with `PW_ALLOW_SCRIPTS=true` and `MCP_TRANSPORT=http`. All domain tools and basic browser tools are available.
+- **Limits.** `MCP_MAX_SESSIONS` (default 5, a new session beyond it gets `503`) and `MCP_SESSION_IDLE_MS` (default 30 minutes without requests closes the session and its context). A client ending its session (`DELETE /mcp`) frees it at once.
+- `GET /healthz` returns `{"status":"ok","sessions":N}` without a token, for Docker or load balancer health checks.
+
+The token protects the endpoint, not the traffic: plain HTTP is fine on localhost or inside a private network. Anything beyond that belongs behind a reverse proxy with TLS. Check it end to end: `node sample-store/mcp-smoke.mjs https://app.hyva-demo.test --http` (add `--docker <image>` for the image).
+
+## Step 9. Code mode (`browser_run`)
 
 Instead of a navigate → snapshot → click → snapshot chain, the agent writes one Playwright script, the server runs it, and only the result goes back into the agent's context. Fewer tokens, and loops and conditions become possible.
 
@@ -238,7 +272,7 @@ A guest checkout takes 5–10 s: pass a larger `timeoutMs` for loops. Every URL 
 
 Example prompt for Claude Code: "Using `browser_run` and the magento helpers, check the cache of every Gear category on https://app.hyva-demo.test and run a guest checkout for two bags; return only problems".
 
-## Step 9. Magento guest checkout (`magento_guest_checkout`)
+## Step 10. Magento guest checkout (`magento_guest_checkout`)
 
 One call goes through the real storefront like a customer: product page → Add to Cart → checkout → shipping address → shipping method → payment method → (optionally) Place Order. It returns a compact QA report:
 
@@ -275,7 +309,7 @@ Behavior worth knowing:
 - Without `options`, a product with options fails immediately with an explanation. Bundle products are not supported: use `browser_run`.
 - Supported: the standard `Magento_Checkout` (Luma, and Hyvä with `hyva-themes/magento2-luma-checkout`). Hyvä Checkout (Magewire) and other one-step checkouts are detected and reported as unsupported.
 
-## Step 10. Full page cache check (`magento_cache_check`)
+## Step 11. Full page cache check (`magento_cache_check`)
 
 Requests each URL several times over plain HTTP and tells whether the full page cache serves it, and if not, why:
 
@@ -297,7 +331,7 @@ How it decides:
 - **Verdicts:** `CACHED`; `NOT_CACHEABLE` (marked expected for cart/checkout/customer pages, otherwise a hint to look for a `cacheable="false"` layout block); `MISS` (looks cacheable but is not served from cache: lists `Set-Cookie` on the response, query strings, and the config to check); `UNKNOWN` (no status headers, e.g. production mode hides `X-Magento-Cache-Debug`); `ERROR` (4xx/5xx or not allowlisted).
 - Redirects are reported, not followed.
 
-## Step 11. GraphQL check (`magento_graphql_check`)
+## Step 12. GraphQL check (`magento_graphql_check`)
 
 Checks the GraphQL API that headless/PWA storefronts and many Hyvä/Luma widgets depend on. Without a query it runs preset checks, one line each:
 
@@ -321,7 +355,7 @@ Summary: 5/5 OK
 
 With `query` (and optional `variables`, `method: "GET"` to see the cache status) it runs your query instead and returns HTTP status, GraphQL errors with category and path, timing and the data truncated to `maxChars` (default 2000). Other input: `storeUrl` (any store URL, or the full endpoint), `checks` (a subset of presets), `storeCode` (sent as the `Store` header). Requests are sent as a cookie-less guest; non-JSON answers (an HTML error page, a redirect) are described instead of failing the call.
 
-## Step 12. Price and stock check (`magento_product_check`)
+## Step 13. Price and stock check (`magento_product_check`)
 
 Compares what a guest sees on each product page with what Magento GraphQL reports for the same product (found by URL through `route`, falling back to the `url_key`). The page is opened in a fresh guest context, so both sides use the NOT LOGGED IN customer group. Here the price was changed in the database without a cache flush, so Varnish still serves the old page:
 
@@ -343,7 +377,7 @@ MISMATCH 24-MB01 "Joust Duffle Bag" (simple) https://app.hyva-demo.test/joust-du
 
 Verdicts: `OK`, `MISMATCH`, `UNKNOWN` (the page price was not found: theme markup not recognized), `ERROR` (page or GraphQL failed, the URL is not a product). JSON-LD offers (`Product`, `ProductGroup` variants, `AggregateOffer`) and the `product:price:amount` meta tag are compared too, as warnings (`·`) that do not change the verdict. Prices are read from the first `.price-box` in `.product-info-main` outside related/upsell lists: `data-price-amount` on Luma, the formatted text on Hyvä (any locale format, e.g. `1.234,50 €`). Input: `urls` (up to 20), `storeCode` (sent to GraphQL as the `Store` header).
 
-## Step 13. Adding your own tool
+## Step 14. Adding your own tool
 
 ```ts
 const CartTotalInput = z.object({ productUrl: z.string() });

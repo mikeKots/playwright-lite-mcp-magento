@@ -60,6 +60,7 @@ The same checks against the Docker image (as Claude Code would start it):
 ```bash
 docker build -t playwright-lite-mcp .
 node sample-store/mcp-smoke.mjs https://app.hyva-demo.test --docker playwright-lite-mcp
+node sample-store/mcp-smoke.mjs https://app.hyva-demo.test --http       # HTTP transport (browser_run must be absent)
 ```
 
 Token benchmark against the official `@playwright/mcp` (needs Google Chrome; the official server is fetched with npx):
