@@ -4,6 +4,9 @@ All notable changes to this project. Versions follow [semantic versioning](https
 
 ## [Unreleased]
 
+### Changed
+- Release workflow publishes to npm through trusted publishing (OIDC) instead of an `NPM_TOKEN` secret; each npm version gets a provenance attestation. The release build no longer uses the npm dependency cache.
+
 ## [0.1.0] - 2026-11-24
 
 First public version.
