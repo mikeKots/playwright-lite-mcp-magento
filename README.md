@@ -51,7 +51,21 @@ claude mcp add -s user playwright-lite -- docker run -i --rm --init \
   ghcr.io/mikekots/playwright-lite-mcp-magento:latest
 ```
 
-Without Docker, see [Step 1](#step-1-install) and [Step 6](#step-6-connect-to-claude-code). One shared server for a team or a QA box: [HTTP transport](#step-8-http-transport). A ready-made demo store to try it on: [sample-store/](sample-store/README.md).
+## Quick start (npx, no Docker)
+
+Requires Node.js 20+. Install the browser once (the version must match the Playwright the package uses), then register the server:
+
+```bash
+npx playwright@1.63.0 install chromium
+claude mcp add -s user playwright-lite \
+  -e PW_ALLOWED_ORIGINS="https://your-store.example.com" \
+  -e PW_ALLOW_SCRIPTS=true \
+  -- npx -y playwright-lite-mcp
+```
+
+A local `.test` store works directly here (no `--add-host`, and the host trusts its local CA). If the browser is missing, the tools answer with the exact install command. Other MCP clients: command `npx`, arguments `-y playwright-lite-mcp`, the same environment variables.
+
+From source: [Step 1](#step-1-install) and [Step 6](#step-6-connect-to-claude-code). One shared server for a team or a QA box: [HTTP transport](#step-8-http-transport). A ready-made demo store to try it on: [sample-store/](sample-store/README.md).
 
 ## Tools
 
@@ -102,7 +116,7 @@ The official server is general-purpose, and therefore heavy: large page snapshot
 
 ## Step 1. Install
 
-Requires Node.js 20+.
+From source. Building and testing need Node.js 22.12+ (the published package runs on Node.js 20+).
 
 ```bash
 npm install
