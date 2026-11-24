@@ -4,9 +4,32 @@ A token-efficient MCP server for **Magento 2 / Adobe Commerce / Mage-OS QA** by 
 
 **A guest checkout check costs ~3,000 tokens instead of ~20,000** with the official `@playwright/mcp` ([benchmark](#token-benchmark)).
 
+It works with any MCP client (Claude Code, Cursor, Codex, VS Code, an agent on a local model): the server only drives a browser and sends HTTP requests to the store. It calls no LLM itself and needs no API key; the client's model does the reasoning and its tokens are billed to the client as usual.
+
+## Quick start (Claude Code plugin)
+
+The plugin brings the MCP server (the Docker image, started by Claude Code) and a `magento-qa` skill: a playbook that tells the agent which tool answers which question, to use code mode for multi-page work, how to read the verdicts, and never to place orders on production. Requires Docker.
+
+```
+/plugin install playwright-lite-mcp --marketplace mikeKots/playwright-lite-mcp-magento
+```
+
+(On Claude Code before 2.1.275: `/plugin marketplace add mikeKots/playwright-lite-mcp-magento`, then `/plugin install playwright-lite-mcp@playwright-lite-mcp-magento`.)
+
+The install asks for its options; change them later with `/plugin configure playwright-lite-mcp`:
+
+| Option | Default | |
+|---|---|---|
+| Allowed store origins | required | `PW_ALLOWED_ORIGINS`, e.g. `https://staging.example.com,https://*.example.com` |
+| Code mode (`browser_run`) | on | `PW_ALLOW_SCRIPTS`: scripts run inside the container |
+| Local store hostname | `host.docker.internal` | a store on this machine (Warden, DDEV, Valet), e.g. `app.mystore.test`: the container resolves it to the host |
+| Ignore HTTPS errors | off | `PW_IGNORE_HTTPS_ERRORS`: needed for a local store, whose CA the container does not trust |
+
+Then run `/mcp` and check that `plugin:playwright-lite-mcp:playwright-lite` is connected, and ask, for example: *"Smoke-test the checkout and the page cache of https://staging.example.com"*. For other settings (`PW_COOKIE_ACCEPT`, timeouts, a logged-in session) use the manual setup below.
+
 ## Quick start (Docker, one command)
 
-Requires Docker. Claude Code starts the container itself; the image is pulled on first use:
+Without the plugin, or with another MCP client. Requires Docker. Claude Code starts the container itself; the image is pulled on first use:
 
 ```bash
 claude mcp add -s user playwright-lite -- docker run -i --rm --init \
@@ -61,7 +84,11 @@ Tokens are estimated as characters / 4. The official server gets its cheapest re
 | Mage-OS 4.0.0 (Magento 2.4.x) + Hyvä 1.5, Varnish | developer | all tools pass |
 | same store, Hyvä | production | all tools pass (`magento_product_check` not run in production yet) |
 | same store, Luma | developer | all tools pass |
-| Adobe Commerce Cloud (Fastly), Hyvä Checkout | — | not tested yet: reports and PRs welcome |
+| Adobe Commerce Cloud (Fastly) | — | not tested yet: reports and PRs welcome |
+
+Known limitations:
+- **Hyvä Checkout** (Magewire) is not supported by `magento_guest_checkout`: it is a paid product, so it cannot be tested here. It is detected and reported as unsupported; the standard `Magento_Checkout` works on Luma and on Hyvä with `hyva-themes/magento2-luma-checkout`. `browser_run` can script other checkouts.
+- **Bundle products** cannot be added to the cart by `magento_guest_checkout`: script them with `browser_run`.
 
 The demo store and the checks are in [sample-store/](sample-store/README.md): `sample-store/check.sh` runs every tool against a store over MCP.
 
@@ -108,6 +135,9 @@ src/
   logger.ts         JSON logs to stderr
   errors.ts         turns Playwright errors into short, agent-readable messages
   *.test.ts         tests: allowlist, cookies, code mode, tool integration, checkout, cache, GraphQL, product, HTTP transport
+skills/magento-qa/  Claude Code plugin skill: the QA playbook for the agent
+.claude-plugin/     plugin manifest (plugin.json) and marketplace (marketplace.json)
+.mcp.json           the plugin's MCP server: the Docker image over stdio
 sample-store/       demo store (Mage-OS + Hyvä on Warden): setup.sh, check.sh, mcp-smoke.mjs, benchmark.mjs
 .github/workflows/  CI (tests + Docker build) and Release (GHCR image, GitHub release, npm)
 ```
@@ -415,8 +445,3 @@ git fetch origin && git tag v0.1.1 origin/main && git push origin v0.1.1
 ```
 
 The `Release` workflow (started by the tag) then tests, builds and pushes the Docker image to GitHub Container Registry, creates a GitHub release and, when the `NPM_TOKEN` secret is set, publishes the npm package (so it can also run with `npx playwright-lite-mcp`). `CI` runs typecheck, tests, build and a Docker build on every push and pull request.
-
-## What's next
-
-- **HTTP transport** (`@modelcontextprotocol/node` or `@modelcontextprotocol/express`) with authentication, so one server can serve a team or CI. That needs a separate browser context per session, and `browser_run` must never be exposed over it.
-- **More checks:** configurable product option picking in the checkout, Hyvä Checkout (Magewire) support, price and stock checks.

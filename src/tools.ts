@@ -497,6 +497,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         stepTimeoutMs: cfg.PW_NAV_TIMEOUT_MS,
         afterNavigate: (p) => browser.acceptCookies(p),
         drainConsole: () => browser.drainErrors(),
+        codeMode: cfg.PW_ALLOW_SCRIPTS,
       });
       const result = text(formatCheckoutReport(report, args.placeOrder ?? false));
       return report.ok ? result : { ...result, isError: true };

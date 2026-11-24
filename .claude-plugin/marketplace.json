@@ -1,0 +1,22 @@
+{
+  "name": "playwright-lite-mcp-magento",
+  "description": "Magento / Adobe Commerce QA tools for AI coding agents.",
+  "owner": {
+    "name": "Mykhailo Kots",
+    "url": "https://github.com/mikeKots"
+  },
+  "plugins": [
+    {
+      "name": "playwright-lite-mcp",
+      "source": "./",
+      "description": "Magento / Adobe Commerce QA tools for AI agents: MCP server (Docker) and a QA playbook skill.",
+      "category": "testing",
+      "tags": [
+        "magento",
+        "qa",
+        "playwright",
+        "mcp"
+      ]
+    }
+  ]
+}

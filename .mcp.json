@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "playwright-lite": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--init",
+        "--add-host=${user_config.local_store_host}:host-gateway",
+        "-e",
+        "PW_ALLOWED_ORIGINS",
+        "-e",
+        "PW_ALLOW_SCRIPTS",
+        "-e",
+        "PW_IGNORE_HTTPS_ERRORS",
+        "ghcr.io/mikekots/playwright-lite-mcp-magento:latest"
+      ],
+      "env": {
+        "PW_ALLOWED_ORIGINS": "${user_config.allowed_origins}",
+        "PW_ALLOW_SCRIPTS": "${user_config.allow_scripts}",
+        "PW_IGNORE_HTTPS_ERRORS": "${user_config.ignore_https_errors}"
+      }
+    }
+  }
+}
