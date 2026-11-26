@@ -18,11 +18,12 @@ jobs:
   release:
     runs-on: ubuntu-latest # trusted publishing works on GitHub-hosted runners only
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           # No dependency cache in a release build: a poisoned cache would end up in the published package.
+          package-manager-cache: false
           registry-url: https://registry.npmjs.org
 
       - name: Tag matches package.json
@@ -37,16 +38,16 @@ jobs:
       - run: npm test
       - run: npm run build
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Image name (lowercase)
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -64,6 +65,6 @@ jobs:
           npm install -g npm@^11.5.1
           npm publish --access public
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true

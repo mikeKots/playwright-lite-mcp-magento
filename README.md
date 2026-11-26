@@ -1,5 +1,10 @@
 # playwright-lite-mcp
 
+[![npm](https://img.shields.io/npm/v/playwright-lite-mcp)](https://www.npmjs.com/package/playwright-lite-mcp)
+[![CI](https://github.com/mikeKots/playwright-lite-mcp-magento/actions/workflows/ci.yml/badge.svg)](https://github.com/mikeKots/playwright-lite-mcp-magento/actions/workflows/ci.yml)
+[![Docker image](https://img.shields.io/badge/ghcr.io-playwright--lite--mcp--magento-blue?logo=docker)](https://github.com/mikeKots/playwright-lite-mcp-magento/pkgs/container/playwright-lite-mcp-magento)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/mikeKots/playwright-lite-mcp-magento/blob/main/LICENSE)
+
 A token-efficient MCP server for **Magento 2 / Adobe Commerce / Mage-OS QA** by AI coding agents: health, full page cache, GraphQL and guest checkout checks in one call each, plus a Playwright **code mode** with a `magento` helper API for everything else. TypeScript, MCP SDK v2, Playwright.
 
 **A guest checkout check costs ~3,000 tokens instead of ~20,000** with the official `@playwright/mcp` ([benchmark](#token-benchmark)).

@@ -12,8 +12,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -23,11 +23,22 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  plugin:
+    # The Claude Code plugin manifests (.claude-plugin/, .mcp.json, skills/) still match the plugin schema.
+    # Warnings (no version on purpose, no icon) do not fail it; errors do. No Claude login is needed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: npx -y @anthropic-ai/claude-code@2.1.331 plugin validate .
+
   docker:
     # Catches a broken Dockerfile or a Playwright image tag that no longer matches package.json.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker build -t playwright-lite-mcp:ci .
       - name: Server starts in the image
         run: |
